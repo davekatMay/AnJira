@@ -1,0 +1,10 @@
+*.iml
+.gradle
+.idea
+**/.idea
+build
+/android_client
+/app/build
+/backend/build
+/local.properties
+.DS_Store
