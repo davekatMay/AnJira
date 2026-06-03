@@ -17,11 +17,11 @@ class AuthViewModel(
     private val _uiState = MutableStateFlow<UiState>(UiState.Idle)
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
 
-    fun register(username: String, email: String, password: String) {
+    fun register(email: String, password: String) {
         viewModelScope.launch {
             _uiState.value = UiState.Loading
             try {
-                val user = authRepository.register(username, email, password)
+                val user = authRepository.register(email, password)
                 _uiState.value = UiState.Success(user)
             } catch (e: Exception) {
                 _uiState.value = UiState.Error(e.message ?: "Registration failed")

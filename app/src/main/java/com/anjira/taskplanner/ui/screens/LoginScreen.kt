@@ -17,7 +17,7 @@ fun LoginScreen(
 ) {
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
-    var username by remember { mutableStateOf("") }
+    var confirmPassword by remember { mutableStateOf("") }
     var isRegisterMode by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var isLoading by remember { mutableStateOf(false) }
@@ -64,18 +64,6 @@ fun LoginScreen(
 
             Spacer(modifier = Modifier.height(48.dp))
 
-            if (isRegisterMode) {
-                OutlinedTextField(
-                    value = username,
-                    onValueChange = { username = it },
-                    label = { Text("Имя пользователя") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Spacer(modifier = Modifier.height(12.dp))
-            }
-
             OutlinedTextField(
                 value = email,
                 onValueChange = { email = it },
@@ -95,17 +83,33 @@ fun LoginScreen(
                 modifier = Modifier.fillMaxWidth()
             )
 
+            if (isRegisterMode) {
+                Spacer(modifier = Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = confirmPassword,
+                    onValueChange = { confirmPassword = it },
+                    label = { Text("Повторите пароль") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+
             Spacer(modifier = Modifier.height(24.dp))
 
             Button(
                 onClick = {
                     errorMessage = null
                     if (isRegisterMode) {
-                        if (username.isBlank()) {
-                            errorMessage = "Имя пользователя обязательно"
+                        if (password != confirmPassword) {
+                            errorMessage = "Пароли не совпадают"
                             return@Button
                         }
-                        authViewModel.register(username, email, password)
+                        if (password.length < 6) {
+                            errorMessage = "Пароль должен быть не менее 6 символов"
+                            return@Button
+                        }
+                        authViewModel.register(email, password)
                     } else {
                         authViewModel.login(email, password)
                     }

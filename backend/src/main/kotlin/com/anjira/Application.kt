@@ -45,7 +45,9 @@ fun main() {
 
         routing {
             AuthRoute()
-            GroupRoute()
+            authenticate("jwt") {
+                GroupRoute()
+            }
         }
 
     }.start(wait = true)

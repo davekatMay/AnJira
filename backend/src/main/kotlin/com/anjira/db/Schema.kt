@@ -2,6 +2,7 @@ package com.anjira.db
 
 import org.jetbrains.exposed.dao.id.IntIdTable
 import org.jetbrains.exposed.sql.Column
+import org.jetbrains.exposed.sql.Table
 
 object UserTable : IntIdTable("users") {
     val username: Column<String> = varchar("username", 50).uniqueIndex()
@@ -11,9 +12,21 @@ object UserTable : IntIdTable("users") {
     val updatedAt: Column<String> = varchar("updated_at", 50)
 }
 
+object RefreshTokenTable : Table("refresh_tokens") {
+    val id = integer("id").autoIncrement()
+    val userId: Column<Int> = integer("user_id").references(UserTable.id)
+    val token: Column<String> = varchar("token", 512)
+    val expiresAt: Column<String> = varchar("expires_at", 50)
+    val createdAt: Column<String> = varchar("created_at", 50)
+
+    override val primaryKey = PrimaryKey(id)
+}
+
 object GroupTable : IntIdTable("groups") {
     val name: Column<String> = varchar("name", 100)
     val description: Column<String?> = varchar("description", 500).nullable()
+    val avatar: Column<String?> = varchar("avatar", 500).nullable()
+    val inviteCode: Column<String> = varchar("invite_code", 20).uniqueIndex()
     val createdBy: Column<Int> = integer("created_by").references(UserTable.id)
     val createdAt: Column<String> = varchar("created_at", 50)
     val updatedAt: Column<String> = varchar("updated_at", 50)

@@ -4,63 +4,62 @@ import com.auth0.jwt.JWT
 import com.auth0.jwt.algorithms.Algorithm
 import com.auth0.jwt.interfaces.DecodedJWT
 import java.util.Date
-import javax.crypto.spec.SecretKeySpec
 
-class JwtUtil private constructor(
-    private val algorithm: Algorithm,
-    private val issuer: String = "taskplanner",
-    private val audience: String = "taskplanner_users",
-    private val expiryMinutes: Long = 60 * 24
-) {
-    companion object {
-        @Volatile private var INSTANCE: JwtUtil? = null
+class JwtUtil private constructor(private val secret: String) {
 
-        fun getInstance(): JwtUtil {
-            return INSTANCE ?: synchronized(this) {
-                INSTANCE ?: JwtUtil(
-                    algorithm = createAlgorithm(),
-                    issuer = System.getenv("JWT_ISSUER") ?: "taskplanner",
-                    audience = System.getenv("JWT_AUDIENCE") ?: "taskplanner_users",
-                    expiryMinutes = System.getenv("JWT_EXPIRY_MINUTES")?.toLong() ?: 60 * 24
-                ).also { INSTANCE = it }
-            }
-        }
+    private val algorithm = Algorithm.HMAC256(secret)
+    private val issuer = "taskplanner"
+    private val audience = "taskplanner_users"
+    private val accessExpiryMs = 60 * 60 * 1000L       // 1 hour
+    private val refreshExpiryMs = 30 * 24 * 60 * 60 * 1000L // 30 days
 
-        private fun createAlgorithm(): Algorithm {
-            val secret = System.getenv("JWT_SECRET") ?: "default-secret-key-change-in-production"
-            return Algorithm.HMAC256(secret)
-        }
-    }
-
-    fun generateToken(userId: Int, username: String): String {
-        val now = Date()
-        val expiry = Date(now.time + expiryMinutes * 60 * 1000)
-
+    fun generateAccessToken(userId: Int, username: String): String {
         return JWT.create()
             .withIssuer(issuer)
             .withAudience(audience)
             .withSubject(userId.toString())
             .withClaim("username", username)
-            .withIssuedAt(now)
-            .withExpiresAt(expiry)
+            .withClaim("type", "access")
+            .withIssuedAt(Date())
+            .withExpiresAt(Date(System.currentTimeMillis() + accessExpiryMs))
             .sign(algorithm)
     }
 
-    fun getUserIdFromToken(token: String): Int {
-        val verifier = JWT.require(algorithm)
+    fun generateRefreshToken(userId: Int): String {
+        return JWT.create()
             .withIssuer(issuer)
             .withAudience(audience)
-            .build()
-        val decoded: DecodedJWT = verifier.verify(token)
-        return decoded.subject!!.toInt()
+            .withSubject(userId.toString())
+            .withClaim("type", "refresh")
+            .withIssuedAt(Date())
+            .withExpiresAt(Date(System.currentTimeMillis() + refreshExpiryMs))
+            .sign(algorithm)
     }
 
-    fun getUsernameFromToken(token: String): String {
-        val verifier = JWT.require(algorithm)
-            .withIssuer(issuer)
-            .withAudience(audience)
-            .build()
-        val decoded: DecodedJWT = verifier.verify(token)
-        return decoded.getClaim("username").asString()
+    fun verifyToken(token: String): DecodedJWT? {
+        return try {
+            JWT.require(algorithm)
+                .withIssuer(issuer)
+                .withAudience(audience)
+                .build()
+                .verify(token)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    fun getUserIdFromToken(token: String): Int? {
+        return verifyToken(token)?.subject?.toIntOrNull()
+    }
+
+    companion object {
+        @Volatile
+        private var instance: JwtUtil? = null
+
+        fun getInstance(): JwtUtil {
+            return instance ?: synchronized(this) {
+                instance ?: JwtUtil(System.getenv("JWT_SECRET") ?: "default-secret-key-change-in-production").also { instance = it }
+            }
+        }
     }
 }

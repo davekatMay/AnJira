@@ -4,6 +4,7 @@ import com.anjira.db.GroupMemberTable
 import com.anjira.db.GroupTable
 import com.anjira.db.MeetingParticipantTable
 import com.anjira.db.MeetingTable
+import com.anjira.db.RefreshTokenTable
 import com.anjira.db.SubtaskTable
 import com.anjira.db.TaskTable
 import com.anjira.db.UserTable
@@ -25,7 +26,8 @@ object DatabaseConfig {
         Database.connect(url, driver = "org.postgresql.Driver", user = user, password = password)
 
         transaction {
-            SchemaUtils.create(UserTable, GroupTable, GroupMemberTable, TaskTable, SubtaskTable, MeetingTable, MeetingParticipantTable)
+            SchemaUtils.drop(UserTable, GroupTable, GroupMemberTable, TaskTable, SubtaskTable, MeetingTable, MeetingParticipantTable, RefreshTokenTable)
+            SchemaUtils.create(UserTable, GroupTable, GroupMemberTable, TaskTable, SubtaskTable, MeetingTable, MeetingParticipantTable, RefreshTokenTable)
             logger.info("Database schema initialized")
         }
     }

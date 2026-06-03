@@ -39,8 +39,10 @@ class GroupViewModel(
         viewModelScope.launch {
             _uiState.value = UiState.Loading
             try {
+                val group = groupRepository.getGroupDetail(groupId)
                 val tasks = groupRepository.getGroupTasks(groupId)
                 val meetings = groupRepository.getGroupMeetings(groupId)
+                _group.value = group
                 _tasks.value = tasks
                 _meetings.value = meetings
                 _uiState.value = UiState.Success
@@ -48,6 +50,10 @@ class GroupViewModel(
                 _uiState.value = UiState.Error(e.message ?: "Failed to load group data")
             }
         }
+    }
+
+    fun refresh() {
+        loadGroupData()
     }
 
     fun createTask(title: String, description: String?, assignedTo: Int?) {
@@ -101,7 +107,7 @@ class GroupViewModel(
         viewModelScope.launch {
             _uiState.value = UiState.Loading
             try {
-                val subtask = groupRepository.createSubtask(taskId, title)
+                groupRepository.createSubtask(taskId, title)
                 _uiState.value = UiState.Success
             } catch (e: Exception) {
                 _uiState.value = UiState.Error(e.message ?: "Failed to create subtask")
@@ -113,7 +119,7 @@ class GroupViewModel(
         viewModelScope.launch {
             _uiState.value = UiState.Loading
             try {
-                val updatedSubtask = groupRepository.updateSubtask(subtaskId, isCompleted)
+                groupRepository.updateSubtask(subtaskId, isCompleted)
                 _uiState.value = UiState.Success
             } catch (e: Exception) {
                 _uiState.value = UiState.Error(e.message ?: "Failed to update subtask")

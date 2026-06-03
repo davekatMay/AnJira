@@ -4,11 +4,10 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -33,8 +32,10 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         val dataStoreManager = DataStoreManager(applicationContext)
-        val authRepository = AuthRepositoryImpl(RetrofitInstance.apiService, dataStoreManager)
-        val groupRepository = GroupRepositoryImpl(RetrofitInstance.apiService, dataStoreManager)
+        RetrofitInstance.init(dataStoreManager)
+        val apiService = RetrofitInstance.apiService
+        val authRepository = AuthRepositoryImpl(apiService, dataStoreManager)
+        val groupRepository = GroupRepositoryImpl(apiService, dataStoreManager)
         val authViewModel = AuthViewModel(authRepository)
 
         setContent {
@@ -46,78 +47,116 @@ class MainActivity : ComponentActivity() {
                     val navController = rememberNavController()
                     val scope = rememberCoroutineScope()
                     var startDestination by remember { mutableStateOf<String?>(null) }
+                    val snackbarHostState = remember { SnackbarHostState() }
 
                     LaunchedEffect(Unit) {
-                        val token = dataStoreManager.getToken()
+                        val token = dataStoreManager.getAccessToken()
                         startDestination = if (token != null) Routes.GROUP_LIST else Routes.LOGIN
                     }
 
                     startDestination?.let { start ->
-                        NavHost(
-                            navController = navController,
-                            startDestination = start
-                        ) {
-                            composable(Routes.LOGIN) {
-                                LoginScreen(
-                                    authViewModel = authViewModel,
-                                    onLoginSuccess = {
-                                        navController.navigate(Routes.GROUP_LIST) {
-                                            popUpTo(Routes.LOGIN) { inclusive = true }
-                                        }
-                                    }
-                                )
-                            }
-
-                            composable(Routes.GROUP_LIST) {
-                                var groups by remember { mutableStateOf<List<Group>>(emptyList()) }
-                                var isLoading by remember { mutableStateOf(true) }
-                                var errorMessage by remember { mutableStateOf<String?>(null) }
-
-                                LaunchedEffect(Unit) {
-                                    isLoading = true
-                                    try {
-                                        groups = groupRepository.getUserGroups()
-                                    } catch (e: Exception) {
-                                        errorMessage = e.message
-                                    }
-                                    isLoading = false
-                                }
-
-                                GroupListScreen(
-                                    groups = groups,
-                                    isLoading = isLoading,
-                                    errorMessage = errorMessage,
-                                    onGroupClick = { groupId ->
-                                        navController.navigate(Routes.groupDetail(groupId))
-                                    },
-                                    onCreateGroup = { name, desc ->
-                                        scope.launch {
-                                            try {
-                                                val group = groupRepository.createGroup(name, desc)
-                                                groups = groups + group
-                                            } catch (e: Exception) {
-                                                errorMessage = e.message
+                        Scaffold(snackbarHost = { SnackbarHost(snackbarHostState) }) { innerPadding ->
+                            NavHost(
+                                navController = navController,
+                                startDestination = start,
+                                modifier = Modifier.padding(innerPadding)
+                            ) {
+                                composable(Routes.LOGIN) {
+                                    LoginScreen(
+                                        authViewModel = authViewModel,
+                                        onLoginSuccess = {
+                                            navController.navigate(Routes.GROUP_LIST) {
+                                                popUpTo(Routes.LOGIN) { inclusive = true }
                                             }
                                         }
-                                    },
-                                    onLogout = {
-                                        authViewModel.logout()
-                                        navController.navigate(Routes.LOGIN) {
-                                            popUpTo(0) { inclusive = true }
+                                    )
+                                }
+
+                                composable(Routes.GROUP_LIST) {
+                                    var groups by remember { mutableStateOf<List<Group>>(emptyList()) }
+                                    var isLoading by remember { mutableStateOf(true) }
+                                    var errorMessage by remember { mutableStateOf<String?>(null) }
+
+                                    fun loadGroups() {
+                                        scope.launch {
+                                            isLoading = true
+                                            errorMessage = null
+                                            try {
+                                                groups = groupRepository.getUserGroups()
+                                            } catch (e: Exception) {
+                                                if (e.message?.contains("401") == true) {
+                                                    val refreshed = authRepository.refreshToken()
+                                                    if (refreshed) {
+                                                        try {
+                                                            groups = groupRepository.getUserGroups()
+                                                        } catch (e2: Exception) {
+                                                            errorMessage = e2.message
+                                                            navController.navigate(Routes.LOGIN) {
+                                                                popUpTo(0) { inclusive = true }
+                                                            }
+                                                        }
+                                                    } else {
+                                                        navController.navigate(Routes.LOGIN) {
+                                                            popUpTo(0) { inclusive = true }
+                                                        }
+                                                    }
+                                                } else {
+                                                    errorMessage = e.message
+                                                }
+                                            }
+                                            isLoading = false
                                         }
                                     }
-                                )
-                            }
 
-                            composable(Routes.GROUP_DETAIL) { backStackEntry ->
-                                val groupId = backStackEntry.arguments?.getString("groupId")?.toIntOrNull() ?: return@composable
-                                val groupViewModel = GroupViewModel(groupRepository, groupId)
+                                    LaunchedEffect(Unit) { loadGroups() }
 
-                                GroupDetailScreen(
-                                    groupViewModel = groupViewModel,
-                                    groupId = groupId,
-                                    onBack = { navController.popBackStack() }
-                                )
+                                    GroupListScreen(
+                                        groups = groups,
+                                        isLoading = isLoading,
+                                        errorMessage = errorMessage,
+                                        onGroupClick = { groupId ->
+                                            navController.navigate(Routes.groupDetail(groupId))
+                                        },
+                                        onCreateGroup = { name, desc, avatar ->
+                                            scope.launch {
+                                                try {
+                                                    val group = groupRepository.createGroup(name, desc, avatar)
+                                                    groups = groups + group
+                                                } catch (e: Exception) {
+                                                    snackbarHostState.showSnackbar(e.message ?: "Failed to create group")
+                                                }
+                                            }
+                                        },
+                                        onJoinGroup = { inviteCode ->
+                                            scope.launch {
+                                                try {
+                                                    val group = groupRepository.joinGroupByCode(inviteCode)
+                                                    groups = groups + group
+                                                    snackbarHostState.showSnackbar("Присоединились к группе ${group.name}")
+                                                } catch (e: Exception) {
+                                                    snackbarHostState.showSnackbar(e.message ?: "Failed to join group")
+                                                }
+                                            }
+                                        },
+                                        onLogout = {
+                                            authViewModel.logout()
+                                            navController.navigate(Routes.LOGIN) {
+                                                popUpTo(0) { inclusive = true }
+                                            }
+                                        }
+                                    )
+                                }
+
+                                composable(Routes.GROUP_DETAIL) { backStackEntry ->
+                                    val groupId = backStackEntry.arguments?.getString("groupId")?.toIntOrNull() ?: return@composable
+                                    val groupViewModel = GroupViewModel(groupRepository, groupId)
+
+                                    GroupDetailScreen(
+                                        groupViewModel = groupViewModel,
+                                        groupId = groupId,
+                                        onBack = { navController.popBackStack() }
+                                    )
+                                }
                             }
                         }
                     }
