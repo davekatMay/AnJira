@@ -4,6 +4,7 @@ data class TaskResponse(
     val id: Int,
     val title: String,
     val description: String?,
+    val deadline: String?,
     val status: String,
     val createdBy: Int,
     val assignedTo: Int?,

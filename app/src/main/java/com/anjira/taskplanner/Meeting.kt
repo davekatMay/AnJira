@@ -5,8 +5,16 @@ data class Meeting(
     val title: String,
     val description: String?,
     val dateTime: String,
+    val endDateTime: String?,
     val location: String?,
     val createdBy: Int,
     val createdAt: String,
     val updatedAt: String
+)
+
+data class MeetingParticipant(
+    val userId: Int,
+    val username: String,
+    val email: String,
+    val status: String // going, maybe, declined, pending
 )

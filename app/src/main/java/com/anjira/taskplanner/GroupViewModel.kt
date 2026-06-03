@@ -3,11 +3,7 @@ package com.anjira.taskplanner.ui.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import com.anjira.taskplanner.domain.model.Group
-import com.anjira.taskplanner.domain.model.Meeting
-import com.anjira.taskplanner.domain.model.Subtask
-import com.anjira.taskplanner.domain.model.Task
-import com.anjira.taskplanner.domain.model.User
+import com.anjira.taskplanner.domain.model.*
 import com.anjira.taskplanner.domain.repository.GroupRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -31,182 +27,183 @@ class GroupViewModel(
     private val _meetings = MutableStateFlow<List<Meeting>>(emptyList())
     val meetings: StateFlow<List<Meeting>> = _meetings.asStateFlow()
 
-    init {
-        loadGroupData()
-    }
+    private val _announcements = MutableStateFlow<List<Announcement>>(emptyList())
+    val announcements: StateFlow<List<Announcement>> = _announcements.asStateFlow()
 
-    private fun loadGroupData() {
+    private val _playlists = MutableStateFlow<List<Playlist>>(emptyList())
+    val playlists: StateFlow<List<Playlist>> = _playlists.asStateFlow()
+
+    private val _tracks = MutableStateFlow<Map<Int, List<PlaylistTrack>>>(emptyMap())
+    val tracks: StateFlow<Map<Int, List<PlaylistTrack>>> = _tracks.asStateFlow()
+
+    private val _itunesResults = MutableStateFlow<String>("[]")
+    val itunesResults: StateFlow<String> = _itunesResults.asStateFlow()
+
+    private val _notifications = MutableStateFlow<List<AppNotification>>(emptyList())
+    val notifications: StateFlow<List<AppNotification>> = _notifications.asStateFlow()
+
+    init { loadGroupData() }
+
+    fun loadGroupData() {
         viewModelScope.launch {
             _uiState.value = UiState.Loading
             try {
-                val group = groupRepository.getGroupDetail(groupId)
-                val tasks = groupRepository.getGroupTasks(groupId)
-                val meetings = groupRepository.getGroupMeetings(groupId)
-                _group.value = group
-                _tasks.value = tasks
-                _meetings.value = meetings
+                _group.value = groupRepository.getGroupDetail(groupId)
+                _tasks.value = groupRepository.getGroupTasks(groupId)
+                _meetings.value = groupRepository.getGroupMeetings(groupId)
+                _announcements.value = groupRepository.getAnnouncements(groupId)
+                _playlists.value = groupRepository.getPlaylists(groupId)
+                _notifications.value = groupRepository.getNotifications()
                 _uiState.value = UiState.Success
             } catch (e: Exception) {
-                _uiState.value = UiState.Error(e.message ?: "Failed to load group data")
+                _uiState.value = UiState.Error(e.message ?: "Failed to load")
             }
         }
     }
 
-    fun refresh() {
-        loadGroupData()
-    }
-
-    fun createTask(title: String, description: String?, assignedTo: Int?) {
+    fun loadTracks(playlistId: Int) {
         viewModelScope.launch {
-            _uiState.value = UiState.Loading
             try {
-                val task = groupRepository.createTask(groupId, title, description, assignedTo)
-                val currentTasks = _tasks.value
-                _tasks.value = currentTasks + task
-                _uiState.value = UiState.Success
-            } catch (e: Exception) {
-                _uiState.value = UiState.Error(e.message ?: "Failed to create task")
-            }
+                val t = groupRepository.getTracks(playlistId)
+                _tracks.value = _tracks.value + (playlistId to t)
+            } catch (_: Exception) {}
         }
     }
 
-    fun updateTask(taskId: Int, title: String?, description: String?, status: String?, assignedTo: Int?) {
+    // ─── Tasks ────────────────────────────────────────────────────────────
+    fun loadTasks(filter: String? = null, status: String? = null) {
+        viewModelScope.launch {
+            try { _tasks.value = groupRepository.getGroupTasks(groupId, filter, status) } catch (_: Exception) {}
+        }
+    }
+
+    fun createTask(title: String, description: String?, deadline: String?, assignedTo: Int?) {
         viewModelScope.launch {
             _uiState.value = UiState.Loading
             try {
-                val updatedTask = groupRepository.updateTask(taskId, title, description, status, assignedTo)
-                val currentTasks = _tasks.value
-                val index = currentTasks.indexOfFirst { it.id == taskId }
-                if (index != -1) {
-                    val updatedTasks = currentTasks.toMutableList()
-                    updatedTasks[index] = updatedTask
-                    _tasks.value = updatedTasks
-                }
+                val t = groupRepository.createTask(groupId, title, description, deadline, assignedTo)
+                _tasks.value = _tasks.value + t
                 _uiState.value = UiState.Success
-            } catch (e: Exception) {
-                _uiState.value = UiState.Error(e.message ?: "Failed to update task")
-            }
+            } catch (e: Exception) { _uiState.value = UiState.Error(e.message ?: "Failed") }
+        }
+    }
+
+    fun updateTask(taskId: Int, title: String?, description: String?, deadline: String?, status: String?, assignedTo: Int?) {
+        viewModelScope.launch {
+            try {
+                val ut = groupRepository.updateTask(taskId, title, description, deadline, status, assignedTo)
+                _tasks.value = _tasks.value.map { if (it.id == taskId) ut else it }
+            } catch (_: Exception) {}
         }
     }
 
     fun deleteTask(taskId: Int) {
         viewModelScope.launch {
-            _uiState.value = UiState.Loading
-            try {
-                groupRepository.deleteTask(taskId)
-                val currentTasks = _tasks.value
-                _tasks.value = currentTasks.filter { it.id != taskId }
-                _uiState.value = UiState.Success
-            } catch (e: Exception) {
-                _uiState.value = UiState.Error(e.message ?: "Failed to delete task")
-            }
+            try { groupRepository.deleteTask(taskId); _tasks.value = _tasks.value.filter { it.id != taskId } } catch (_: Exception) {}
         }
     }
 
-    fun createSubtask(taskId: Int, title: String) {
+    fun toggleTaskStatus(taskId: Int, currentStatus: String) {
+        val newStatus = when (currentStatus) {
+            "to_do" -> "in_progress"
+            "in_progress" -> "done"
+            else -> "to_do"
+        }
+        updateTask(taskId, null, null, null, newStatus, null)
+    }
+
+    // ─── Meetings ─────────────────────────────────────────────────────────
+    fun createMeeting(title: String, description: String?, dateTime: String, endDateTime: String?, location: String?) {
         viewModelScope.launch {
             _uiState.value = UiState.Loading
             try {
-                groupRepository.createSubtask(taskId, title)
+                val m = groupRepository.createMeeting(groupId, title, description, dateTime, endDateTime, location)
+                _meetings.value = _meetings.value + m
                 _uiState.value = UiState.Success
-            } catch (e: Exception) {
-                _uiState.value = UiState.Error(e.message ?: "Failed to create subtask")
-            }
+            } catch (e: Exception) { _uiState.value = UiState.Error(e.message ?: "Failed") }
         }
     }
 
-    fun updateSubtask(subtaskId: Int, isCompleted: Boolean) {
+    fun updateMeeting(meetingId: Int, title: String?, description: String?, dateTime: String?, endDateTime: String?, location: String?) {
         viewModelScope.launch {
-            _uiState.value = UiState.Loading
             try {
-                groupRepository.updateSubtask(subtaskId, isCompleted)
-                _uiState.value = UiState.Success
-            } catch (e: Exception) {
-                _uiState.value = UiState.Error(e.message ?: "Failed to update subtask")
-            }
-        }
-    }
-
-    fun createMeeting(title: String, description: String?, dateTime: String, location: String?) {
-        viewModelScope.launch {
-            _uiState.value = UiState.Loading
-            try {
-                val meeting = groupRepository.createMeeting(groupId, title, description, dateTime, location)
-                val currentMeetings = _meetings.value
-                _meetings.value = currentMeetings + meeting
-                _uiState.value = UiState.Success
-            } catch (e: Exception) {
-                _uiState.value = UiState.Error(e.message ?: "Failed to create meeting")
-            }
-        }
-    }
-
-    fun updateMeeting(meetingId: Int, title: String?, description: String?, dateTime: String?, location: String?) {
-        viewModelScope.launch {
-            _uiState.value = UiState.Loading
-            try {
-                val updatedMeeting = groupRepository.updateMeeting(meetingId, title, description, dateTime, location)
-                val currentMeetings = _meetings.value
-                val index = currentMeetings.indexOfFirst { it.id == meetingId }
-                if (index != -1) {
-                    val updatedMeetings = currentMeetings.toMutableList()
-                    updatedMeetings[index] = updatedMeeting
-                    _meetings.value = updatedMeetings
-                }
-                _uiState.value = UiState.Success
-            } catch (e: Exception) {
-                _uiState.value = UiState.Error(e.message ?: "Failed to update meeting")
-            }
+                val um = groupRepository.updateMeeting(meetingId, title, description, dateTime, endDateTime, location)
+                _meetings.value = _meetings.value.map { if (it.id == meetingId) um else it }
+            } catch (_: Exception) {}
         }
     }
 
     fun deleteMeeting(meetingId: Int) {
         viewModelScope.launch {
-            _uiState.value = UiState.Loading
-            try {
-                groupRepository.deleteMeeting(meetingId)
-                val currentMeetings = _meetings.value
-                _meetings.value = currentMeetings.filter { it.id != meetingId }
-                _uiState.value = UiState.Success
-            } catch (e: Exception) {
-                _uiState.value = UiState.Error(e.message ?: "Failed to delete meeting")
-            }
+            try { groupRepository.deleteMeeting(meetingId); _meetings.value = _meetings.value.filter { it.id != meetingId } } catch (_: Exception) {}
         }
     }
 
-    fun addMeetingParticipant(meetingId: Int, userId: Int) {
+    fun updateRsvp(meetingId: Int, participantId: Int, status: String) {
+        viewModelScope.launch { try { groupRepository.updateRsvp(meetingId, participantId, status) } catch (_: Exception) {} }
+    }
+
+    // ─── Announcements ────────────────────────────────────────────────────
+    fun createAnnouncement(text: String, attachments: String) {
         viewModelScope.launch {
             _uiState.value = UiState.Loading
             try {
-                groupRepository.addMeetingParticipant(meetingId, userId)
+                val a = groupRepository.createAnnouncement(groupId, text, attachments)
+                _announcements.value = listOf(a) + _announcements.value
                 _uiState.value = UiState.Success
-            } catch (e: Exception) {
-                _uiState.value = UiState.Error(e.message ?: "Failed to add meeting participant")
-            }
+            } catch (e: Exception) { _uiState.value = UiState.Error(e.message ?: "Failed") }
         }
     }
 
-    fun removeMeetingParticipant(meetingId: Int, userId: Int) {
+    fun deleteAnnouncement(announcementId: Int) {
         viewModelScope.launch {
-            _uiState.value = UiState.Loading
-            try {
-                groupRepository.removeMeetingParticipant(meetingId, userId)
-                _uiState.value = UiState.Success
-            } catch (e: Exception) {
-                _uiState.value = UiState.Error(e.message ?: "Failed to remove meeting participant")
-            }
+            try { groupRepository.deleteAnnouncement(announcementId); _announcements.value = _announcements.value.filter { it.id != announcementId } } catch (_: Exception) {}
         }
     }
 
-    fun getMeetingParticipants(meetingId: Int) {
+    fun togglePin(announcementId: Int) {
+        viewModelScope.launch {
+            try { groupRepository.togglePinAnnouncement(announcementId); loadGroupData() } catch (_: Exception) {}
+        }
+    }
+
+    // ─── Playlists ────────────────────────────────────────────────────────
+    fun createPlaylist(name: String, type: String, meetingId: Int?) {
         viewModelScope.launch {
             _uiState.value = UiState.Loading
             try {
-                groupRepository.getMeetingParticipants(meetingId)
+                val p = groupRepository.createPlaylist(groupId, name, type, meetingId)
+                _playlists.value = _playlists.value + p
                 _uiState.value = UiState.Success
-            } catch (e: Exception) {
-                _uiState.value = UiState.Error(e.message ?: "Failed to get meeting participants")
-            }
+            } catch (e: Exception) { _uiState.value = UiState.Error(e.message ?: "Failed") }
+        }
+    }
+
+    fun deletePlaylist(playlistId: Int) {
+        viewModelScope.launch {
+            try { groupRepository.deletePlaylist(playlistId); _playlists.value = _playlists.value.filter { it.id != playlistId } } catch (_: Exception) {}
+        }
+    }
+
+    fun addTrack(playlistId: Int, trackId: String, trackName: String, artistName: String, trackViewUrl: String, artworkUrl100: String?, previewUrl: String?) {
+        viewModelScope.launch {
+            try {
+                val t = groupRepository.addTrack(playlistId, trackId, trackName, artistName, trackViewUrl, artworkUrl100, previewUrl)
+                _tracks.value = _tracks.value + (playlistId to (_tracks.value[playlistId] ?: emptyList()) + t)
+            } catch (_: Exception) {}
+        }
+    }
+
+    fun removeTrack(playlistId: Int, trackId: Int) {
+        viewModelScope.launch {
+            try { groupRepository.removeTrack(playlistId, trackId); loadTracks(playlistId) } catch (_: Exception) {}
+        }
+    }
+
+    // ─── iTunes ───────────────────────────────────────────────────────────
+    fun searchItunes(term: String) {
+        viewModelScope.launch {
+            try { _itunesResults.value = groupRepository.searchItunes(term) } catch (_: Exception) { _itunesResults.value = "[]" }
         }
     }
 

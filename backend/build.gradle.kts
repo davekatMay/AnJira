@@ -19,6 +19,8 @@ dependencies {
     implementation("ch.qos.logback:logback-classic:1.4.7")
 
     implementation("com.auth0:java-jwt:4.4.0")
+    implementation("io.ktor:ktor-client-core:2.3.0")
+    implementation("io.ktor:ktor-client-cio:2.3.0")
 
     testImplementation("io.ktor:ktor-server-test-host:2.3.0")
     testImplementation("io.mockk:mockk:1.13.9")

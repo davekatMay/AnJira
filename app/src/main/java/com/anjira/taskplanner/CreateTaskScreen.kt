@@ -155,7 +155,7 @@ fun CreateTaskContent(
                     return@Button
                 }
                 isLoading = true
-                viewModel.createTask(title, if (description.isBlank()) null else description, assignedTo)
+                viewModel.createTask(title, if (description.isBlank()) null else description, null, assignedTo)
             },
             enabled = !isLoading,
             modifier = Modifier

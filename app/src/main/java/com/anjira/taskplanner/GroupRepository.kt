@@ -1,11 +1,6 @@
 package com.anjira.taskplanner.domain.repository
 
-import com.anjira.taskplanner.domain.model.Group
-import com.anjira.taskplanner.domain.model.GroupMember
-import com.anjira.taskplanner.domain.model.Meeting
-import com.anjira.taskplanner.domain.model.Subtask
-import com.anjira.taskplanner.domain.model.Task
-import com.anjira.taskplanner.domain.model.User
+import com.anjira.taskplanner.domain.model.*
 
 interface GroupRepository {
     suspend fun createGroup(name: String, description: String?, avatar: String?): Group
@@ -18,25 +13,50 @@ interface GroupRepository {
     suspend fun removeGroupMember(groupId: Int, userId: Int)
     suspend fun updateMemberRole(groupId: Int, memberId: Int, role: String)
 
-    // Task operations
-    suspend fun getGroupTasks(groupId: Int): List<Task>
-    suspend fun createTask(groupId: Int, title: String, description: String?, assignedTo: Int?): Task
-    suspend fun updateTask(taskId: Int, title: String?, description: String?, status: String?, assignedTo: Int?): Task
+    // Tasks
+    suspend fun getGroupTasks(groupId: Int, filter: String? = null, status: String? = null): List<Task>
+    suspend fun createTask(groupId: Int, title: String, description: String?, deadline: String?, assignedTo: Int?): Task
+    suspend fun updateTask(taskId: Int, title: String?, description: String?, deadline: String?, status: String?, assignedTo: Int?): Task
     suspend fun deleteTask(taskId: Int)
 
-    // Subtask operations
+    // Subtasks
     suspend fun createSubtask(taskId: Int, title: String): Subtask
     suspend fun getTaskSubtasks(taskId: Int): List<Subtask>
     suspend fun updateSubtask(subtaskId: Int, isCompleted: Boolean): Subtask
 
-    // Meeting operations
+    // Meetings
     suspend fun getGroupMeetings(groupId: Int): List<Meeting>
-    suspend fun createMeeting(groupId: Int, title: String, description: String?, dateTime: String, location: String?): Meeting
-    suspend fun updateMeeting(meetingId: Int, title: String?, description: String?, dateTime: String?, location: String?): Meeting
+    suspend fun createMeeting(groupId: Int, title: String, description: String?, dateTime: String, endDateTime: String?, location: String?): Meeting
+    suspend fun updateMeeting(meetingId: Int, title: String?, description: String?, dateTime: String?, endDateTime: String?, location: String?): Meeting
     suspend fun deleteMeeting(meetingId: Int)
-
-    // Meeting participant operations
     suspend fun addMeetingParticipant(meetingId: Int, userId: Int)
     suspend fun removeMeetingParticipant(meetingId: Int, userId: Int)
-    suspend fun getMeetingParticipants(meetingId: Int): List<User>
+    suspend fun getMeetingParticipants(meetingId: Int): List<MeetingParticipant>
+    suspend fun updateRsvp(meetingId: Int, participantId: Int, status: String)
+
+    // Announcements
+    suspend fun getAnnouncements(groupId: Int): List<Announcement>
+    suspend fun createAnnouncement(groupId: Int, text: String, attachments: String): Announcement
+    suspend fun updateAnnouncement(announcementId: Int, text: String?, attachments: String?): Announcement
+    suspend fun deleteAnnouncement(announcementId: Int)
+    suspend fun togglePinAnnouncement(announcementId: Int)
+
+    // Playlists
+    suspend fun getPlaylists(groupId: Int): List<Playlist>
+    suspend fun createPlaylist(groupId: Int, name: String, type: String, meetingId: Int?): Playlist
+    suspend fun updatePlaylist(playlistId: Int, name: String?)
+    suspend fun deletePlaylist(playlistId: Int)
+
+    // Tracks
+    suspend fun getTracks(playlistId: Int): List<PlaylistTrack>
+    suspend fun addTrack(playlistId: Int, trackId: String, trackName: String, artistName: String, trackViewUrl: String, artworkUrl100: String?, previewUrl: String?): PlaylistTrack
+    suspend fun removeTrack(playlistId: Int, trackId: Int)
+    suspend fun reorderTracks(playlistId: Int, trackIds: List<Int>)
+
+    // iTunes
+    suspend fun searchItunes(term: String): String
+
+    // Notifications
+    suspend fun getNotifications(): List<AppNotification>
+    suspend fun markNotificationRead(notificationId: Int)
 }

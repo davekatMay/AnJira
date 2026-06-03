@@ -1,13 +1,6 @@
 package com.anjira.config
 
-import com.anjira.db.GroupMemberTable
-import com.anjira.db.GroupTable
-import com.anjira.db.MeetingParticipantTable
-import com.anjira.db.MeetingTable
-import com.anjira.db.RefreshTokenTable
-import com.anjira.db.SubtaskTable
-import com.anjira.db.TaskTable
-import com.anjira.db.UserTable
+import com.anjira.db.*
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.SchemaUtils
 import org.jetbrains.exposed.sql.transactions.transaction
@@ -25,9 +18,15 @@ object DatabaseConfig {
 
         Database.connect(url, driver = "org.postgresql.Driver", user = user, password = password)
 
+        val allTables = arrayOf(
+            UserTable, GroupTable, GroupMemberTable, TaskTable, SubtaskTable,
+            MeetingTable, MeetingParticipantTable, RefreshTokenTable,
+            AnnouncementTable, PlaylistTable, PlaylistTrackTable, NotificationTable
+        )
+
         transaction {
-            SchemaUtils.drop(UserTable, GroupTable, GroupMemberTable, TaskTable, SubtaskTable, MeetingTable, MeetingParticipantTable, RefreshTokenTable)
-            SchemaUtils.create(UserTable, GroupTable, GroupMemberTable, TaskTable, SubtaskTable, MeetingTable, MeetingParticipantTable, RefreshTokenTable)
+            SchemaUtils.drop(*allTables)
+            SchemaUtils.create(*allTables)
             logger.info("Database schema initialized")
         }
     }
