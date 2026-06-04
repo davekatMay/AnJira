@@ -1,6 +1,5 @@
 package com.anjira.taskplanner.data.repository
 
-import com.anjira.taskplanner.data.local.DataStoreManager
 import com.anjira.taskplanner.data.remote.ApiService
 import com.anjira.taskplanner.data.remote.dto.*
 import com.anjira.taskplanner.domain.model.*
@@ -9,28 +8,29 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 class GroupRepositoryImpl(
-    private val apiService: ApiService,
-    private val dataStoreManager: DataStoreManager
+    private val apiService: ApiService
 ) : GroupRepository {
+
+    private fun <T> checkBody(r: retrofit2.Response<T>): T = r.body() ?: throw Exception("Empty response body")
 
     // ─── Groups ───────────────────────────────────────────────────────────
     override suspend fun createGroup(name: String, description: String?, avatar: String?): Group =
-        withContext(Dispatchers.IO) { apiService.createGroup(GroupCreateRequest(name, description, avatar)).execute().let { r -> if (!r.isSuccessful) throw Exception(r.errorBody()?.string() ?: "Unknown error"); r.body()!!.toGroup() } }
+        withContext(Dispatchers.IO) { apiService.createGroup(GroupCreateRequest(name, description, avatar)).execute().let { r -> if (!r.isSuccessful) throw Exception(r.errorBody()?.string() ?: "Unknown error"); checkBody(r).toGroup() } }
 
     override suspend fun getUserGroups(): List<Group> =
         withContext(Dispatchers.IO) { apiService.getUserGroups().execute().let { r -> if (!r.isSuccessful) throw Exception(r.errorBody()?.string() ?: "Unknown error"); (r.body() ?: emptyList()).map { it.toGroup() } } }
 
     override suspend fun getGroupDetail(groupId: Int): Group =
-        withContext(Dispatchers.IO) { apiService.getGroupDetail(groupId).execute().let { r -> if (!r.isSuccessful) throw Exception(r.errorBody()?.string() ?: "Unknown error"); r.body()!!.toGroup() } }
+        withContext(Dispatchers.IO) { apiService.getGroupDetail(groupId).execute().let { r -> if (!r.isSuccessful) throw Exception(r.errorBody()?.string() ?: "Unknown error"); checkBody(r).toGroup() } }
 
     override suspend fun updateGroup(groupId: Int, name: String?, description: String?, avatar: String?): Group =
-        withContext(Dispatchers.IO) { apiService.updateGroup(groupId, GroupUpdateRequest(name, description, avatar)).execute().let { r -> if (!r.isSuccessful) throw Exception(r.errorBody()?.string() ?: "Unknown error"); r.body()!!.toGroup() } }
+        withContext(Dispatchers.IO) { apiService.updateGroup(groupId, GroupUpdateRequest(name, description, avatar)).execute().let { r -> if (!r.isSuccessful) throw Exception(r.errorBody()?.string() ?: "Unknown error"); checkBody(r).toGroup() } }
 
     override suspend fun deleteGroup(groupId: Int) =
         withContext(Dispatchers.IO) { apiService.deleteGroup(groupId).execute().let { r -> if (!r.isSuccessful) throw Exception(r.errorBody()?.string() ?: "Unknown error") } }
 
     override suspend fun joinGroupByCode(inviteCode: String): Group =
-        withContext(Dispatchers.IO) { apiService.joinGroupByCode(JoinByCodeRequest(inviteCode)).execute().let { r -> if (!r.isSuccessful) throw Exception(r.errorBody()?.string() ?: "Unknown error"); r.body()!!.toGroup() } }
+        withContext(Dispatchers.IO) { apiService.joinGroupByCode(JoinByCodeRequest(inviteCode)).execute().let { r -> if (!r.isSuccessful) throw Exception(r.errorBody()?.string() ?: "Unknown error"); checkBody(r).toGroup() } }
 
     override suspend fun addGroupMember(groupId: Int, userId: Int, role: String) =
         withContext(Dispatchers.IO) { apiService.addGroupMember(groupId, AddMemberRequest(userId, role)).execute().let { r -> if (!r.isSuccessful) throw Exception(r.errorBody()?.string() ?: "Unknown error") } }
@@ -46,33 +46,33 @@ class GroupRepositoryImpl(
         withContext(Dispatchers.IO) { apiService.getGroupTasks(groupId, filter, status).execute().let { r -> if (!r.isSuccessful) throw Exception(r.errorBody()?.string() ?: "Unknown error"); (r.body() ?: emptyList()).map { it.toTask() } } }
 
     override suspend fun createTask(groupId: Int, title: String, description: String?, deadline: String?, assignedTo: Int?): Task =
-        withContext(Dispatchers.IO) { apiService.createTask(groupId, TaskCreateRequest(title, description, deadline, assignedTo)).execute().let { r -> if (!r.isSuccessful) throw Exception(r.errorBody()?.string() ?: "Unknown error"); r.body()!!.toTask() } }
+        withContext(Dispatchers.IO) { apiService.createTask(groupId, TaskCreateRequest(title, description, deadline, assignedTo)).execute().let { r -> if (!r.isSuccessful) throw Exception(r.errorBody()?.string() ?: "Unknown error"); checkBody(r).toTask() } }
 
     override suspend fun updateTask(taskId: Int, title: String?, description: String?, deadline: String?, status: String?, assignedTo: Int?): Task =
-        withContext(Dispatchers.IO) { apiService.updateTask(taskId, TaskUpdateRequest(title, description, deadline, status, assignedTo)).execute().let { r -> if (!r.isSuccessful) throw Exception(r.errorBody()?.string() ?: "Unknown error"); r.body()!!.toTask() } }
+        withContext(Dispatchers.IO) { apiService.updateTask(taskId, TaskUpdateRequest(title, description, deadline, status, assignedTo)).execute().let { r -> if (!r.isSuccessful) throw Exception(r.errorBody()?.string() ?: "Unknown error"); checkBody(r).toTask() } }
 
     override suspend fun deleteTask(taskId: Int) =
         withContext(Dispatchers.IO) { apiService.deleteTask(taskId).execute().let { r -> if (!r.isSuccessful) throw Exception(r.errorBody()?.string() ?: "Unknown error") } }
 
     // ─── Subtasks ─────────────────────────────────────────────────────────
     override suspend fun createSubtask(taskId: Int, title: String): Subtask =
-        withContext(Dispatchers.IO) { apiService.createSubtask(taskId, SubtaskCreateRequest(title)).execute().let { r -> if (!r.isSuccessful) throw Exception(r.errorBody()?.string() ?: "Unknown error"); val s = r.body()!!; Subtask(s.id, s.title, s.isCompleted, s.createdAt, s.updatedAt) } }
+        withContext(Dispatchers.IO) { apiService.createSubtask(taskId, SubtaskCreateRequest(title)).execute().let { r -> if (!r.isSuccessful) throw Exception(r.errorBody()?.string() ?: "Unknown error"); val s = checkBody(r); Subtask(s.id, s.title, s.isCompleted, s.createdAt, s.updatedAt) } }
 
     override suspend fun getTaskSubtasks(taskId: Int): List<Subtask> =
         withContext(Dispatchers.IO) { apiService.getTaskSubtasks(taskId).execute().let { r -> if (!r.isSuccessful) throw Exception(r.errorBody()?.string() ?: "Unknown error"); (r.body() ?: emptyList()).map { Subtask(it.id, it.title, it.isCompleted, it.createdAt, it.updatedAt) } } }
 
     override suspend fun updateSubtask(subtaskId: Int, isCompleted: Boolean): Subtask =
-        withContext(Dispatchers.IO) { apiService.updateSubtask(subtaskId, isCompleted).execute().let { r -> if (!r.isSuccessful) throw Exception(r.errorBody()?.string() ?: "Unknown error"); val s = r.body()!!; Subtask(s.id, s.title, s.isCompleted, s.createdAt, s.updatedAt) } }
+        withContext(Dispatchers.IO) { apiService.updateSubtask(subtaskId, isCompleted).execute().let { r -> if (!r.isSuccessful) throw Exception(r.errorBody()?.string() ?: "Unknown error"); val s = checkBody(r); Subtask(s.id, s.title, s.isCompleted, s.createdAt, s.updatedAt) } }
 
     // ─── Meetings ─────────────────────────────────────────────────────────
     override suspend fun getGroupMeetings(groupId: Int): List<Meeting> =
         withContext(Dispatchers.IO) { apiService.getGroupMeetings(groupId).execute().let { r -> if (!r.isSuccessful) throw Exception(r.errorBody()?.string() ?: "Unknown error"); (r.body() ?: emptyList()).map { it.toMeeting() } } }
 
     override suspend fun createMeeting(groupId: Int, title: String, description: String?, dateTime: String, endDateTime: String?, location: String?, invitedUserIds: List<Int>): Meeting =
-        withContext(Dispatchers.IO) { apiService.createMeeting(groupId, MeetingCreateRequest(title, description, dateTime, endDateTime, location, invitedUserIds)).execute().let { r -> if (!r.isSuccessful) throw Exception(r.errorBody()?.string() ?: "Unknown error"); r.body()!!.toMeeting() } }
+        withContext(Dispatchers.IO) { apiService.createMeeting(groupId, MeetingCreateRequest(title, description, dateTime, endDateTime, location, invitedUserIds)).execute().let { r -> if (!r.isSuccessful) throw Exception(r.errorBody()?.string() ?: "Unknown error"); checkBody(r).toMeeting() } }
 
     override suspend fun updateMeeting(meetingId: Int, title: String?, description: String?, dateTime: String?, endDateTime: String?, location: String?): Meeting =
-        withContext(Dispatchers.IO) { apiService.updateMeeting(meetingId, MeetingUpdateRequest(title, description, dateTime, endDateTime, location)).execute().let { r -> if (!r.isSuccessful) throw Exception(r.errorBody()?.string() ?: "Unknown error"); r.body()!!.toMeeting() } }
+        withContext(Dispatchers.IO) { apiService.updateMeeting(meetingId, MeetingUpdateRequest(title, description, dateTime, endDateTime, location)).execute().let { r -> if (!r.isSuccessful) throw Exception(r.errorBody()?.string() ?: "Unknown error"); checkBody(r).toMeeting() } }
 
     override suspend fun deleteMeeting(meetingId: Int) =
         withContext(Dispatchers.IO) { apiService.deleteMeeting(meetingId).execute().let { r -> if (!r.isSuccessful) throw Exception(r.errorBody()?.string() ?: "Unknown error") } }
@@ -94,10 +94,10 @@ class GroupRepositoryImpl(
         withContext(Dispatchers.IO) { apiService.getAnnouncements(groupId).execute().let { r -> if (!r.isSuccessful) throw Exception(r.errorBody()?.string() ?: "Unknown error"); (r.body() ?: emptyList()).map { it.toAnnouncement() } } }
 
     override suspend fun createAnnouncement(groupId: Int, text: String, attachments: String): Announcement =
-        withContext(Dispatchers.IO) { apiService.createAnnouncement(groupId, AnnouncementCreateRequest(text, attachments)).execute().let { r -> if (!r.isSuccessful) throw Exception(r.errorBody()?.string() ?: "Unknown error"); r.body()!!.toAnnouncement() } }
+        withContext(Dispatchers.IO) { apiService.createAnnouncement(groupId, AnnouncementCreateRequest(text, attachments)).execute().let { r -> if (!r.isSuccessful) throw Exception(r.errorBody()?.string() ?: "Unknown error"); checkBody(r).toAnnouncement() } }
 
     override suspend fun updateAnnouncement(announcementId: Int, text: String?, attachments: String?): Announcement =
-        withContext(Dispatchers.IO) { apiService.updateAnnouncement(announcementId, AnnouncementUpdateRequest(text, attachments)).execute().let { r -> if (!r.isSuccessful) throw Exception(r.errorBody()?.string() ?: "Unknown error"); r.body()!!.toAnnouncement() } }
+        withContext(Dispatchers.IO) { apiService.updateAnnouncement(announcementId, AnnouncementUpdateRequest(text, attachments)).execute().let { r -> if (!r.isSuccessful) throw Exception(r.errorBody()?.string() ?: "Unknown error"); checkBody(r).toAnnouncement() } }
 
     override suspend fun deleteAnnouncement(announcementId: Int) =
         withContext(Dispatchers.IO) { apiService.deleteAnnouncement(announcementId).execute().let { r -> if (!r.isSuccessful) throw Exception(r.errorBody()?.string() ?: "Unknown error") } }
@@ -110,7 +110,7 @@ class GroupRepositoryImpl(
         withContext(Dispatchers.IO) { apiService.getPlaylists(groupId).execute().let { r -> if (!r.isSuccessful) throw Exception(r.errorBody()?.string() ?: "Unknown error"); (r.body() ?: emptyList()).map { it.toPlaylist() } } }
 
     override suspend fun createPlaylist(groupId: Int, name: String, type: String, meetingId: Int?): Playlist =
-        withContext(Dispatchers.IO) { apiService.createPlaylist(groupId, PlaylistCreateRequest(name, type, meetingId)).execute().let { r -> if (!r.isSuccessful) throw Exception(r.errorBody()?.string() ?: "Unknown error"); r.body()!!.toPlaylist() } }
+        withContext(Dispatchers.IO) { apiService.createPlaylist(groupId, PlaylistCreateRequest(name, type, meetingId)).execute().let { r -> if (!r.isSuccessful) throw Exception(r.errorBody()?.string() ?: "Unknown error"); checkBody(r).toPlaylist() } }
 
     override suspend fun updatePlaylist(playlistId: Int, name: String?) =
         withContext(Dispatchers.IO) { apiService.updatePlaylist(playlistId, PlaylistUpdateRequest(name)).execute().let { r -> if (!r.isSuccessful) throw Exception(r.errorBody()?.string() ?: "Unknown error") } }
@@ -123,7 +123,7 @@ class GroupRepositoryImpl(
         withContext(Dispatchers.IO) { apiService.getTracks(playlistId).execute().let { r -> if (!r.isSuccessful) throw Exception(r.errorBody()?.string() ?: "Unknown error"); (r.body() ?: emptyList()).map { it.toPlaylistTrack() } } }
 
     override suspend fun addTrack(playlistId: Int, trackId: String, trackName: String, artistName: String, trackViewUrl: String, artworkUrl100: String?, previewUrl: String?): PlaylistTrack =
-        withContext(Dispatchers.IO) { apiService.addTrack(playlistId, AddTrackRequest(trackId, trackName, artistName, trackViewUrl, artworkUrl100, previewUrl)).execute().let { r -> if (!r.isSuccessful) throw Exception(r.errorBody()?.string() ?: "Unknown error"); r.body()!!.toPlaylistTrack() } }
+        withContext(Dispatchers.IO) { apiService.addTrack(playlistId, AddTrackRequest(trackId, trackName, artistName, trackViewUrl, artworkUrl100, previewUrl)).execute().let { r -> if (!r.isSuccessful) throw Exception(r.errorBody()?.string() ?: "Unknown error"); checkBody(r).toPlaylistTrack() } }
 
     override suspend fun removeTrack(playlistId: Int, trackId: Int) =
         withContext(Dispatchers.IO) { apiService.removeTrack(playlistId, trackId).execute().let { r -> if (!r.isSuccessful) throw Exception(r.errorBody()?.string() ?: "Unknown error") } }
@@ -146,10 +146,10 @@ class GroupRepositoryImpl(
         withContext(Dispatchers.IO) { apiService.markNotificationRead(notificationId).execute().let { r -> if (!r.isSuccessful) throw Exception(r.errorBody()?.string() ?: "Unknown error") } }
 
     // ─── Mappers ──────────────────────────────────────────────────────────
-    private fun com.anjira.taskplanner.data.remote.dto.GroupResponse.toGroup() = Group(id, name, description, avatar, inviteCode, createdBy, members.map { GroupMember(it.userId, it.username, it.email, it.role, it.createdAt, it.updatedAt) }, createdAt, updatedAt)
-    private fun com.anjira.taskplanner.data.remote.dto.TaskResponse.toTask() = Task(id, title, description, deadline, status, createdBy, assignedTo, createdAt, updatedAt)
-    private fun com.anjira.taskplanner.data.remote.dto.MeetingResponse.toMeeting() = Meeting(id, title, description, dateTime, endDateTime, location, createdBy, createdAt, updatedAt, myRsvp)
-    private fun com.anjira.taskplanner.data.remote.dto.AnnouncementResponse.toAnnouncement() = Announcement(id, groupId, text, attachments, isPinned, createdBy, createdByUsername, createdAt, updatedAt)
-    private fun com.anjira.taskplanner.data.remote.dto.PlaylistResponse.toPlaylist() = Playlist(id, groupId, name, type, meetingId, createdBy, createdByUsername, createdAt, updatedAt)
-    private fun com.anjira.taskplanner.data.remote.dto.TrackResponse.toPlaylistTrack() = PlaylistTrack(id, playlistId, trackId, trackName, artistName, trackViewUrl, artworkUrl100, previewUrl, sortOrder, createdAt)
+    private fun GroupResponse.toGroup() = Group(id, name, description, avatar, inviteCode, createdBy, members.map { GroupMember(it.userId, it.username, it.email, it.role, it.createdAt, it.updatedAt) }, createdAt, updatedAt)
+    private fun TaskResponse.toTask() = Task(id, title, description, deadline, status, createdBy, assignedTo, createdAt, updatedAt)
+    private fun MeetingResponse.toMeeting() = Meeting(id, title, description, dateTime, endDateTime, location, createdBy, createdAt, updatedAt, myRsvp)
+    private fun AnnouncementResponse.toAnnouncement() = Announcement(id, groupId, text, attachments, isPinned, createdBy, createdByUsername, createdAt, updatedAt)
+    private fun PlaylistResponse.toPlaylist() = Playlist(id, groupId, name, type, meetingId, createdBy, createdByUsername, createdAt, updatedAt)
+    private fun TrackResponse.toPlaylistTrack() = PlaylistTrack(id, playlistId, trackId, trackName, artistName, trackViewUrl, artworkUrl100, previewUrl, sortOrder, createdAt)
 }

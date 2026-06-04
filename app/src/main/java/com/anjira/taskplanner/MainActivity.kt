@@ -27,9 +27,7 @@ import com.anjira.taskplanner.ui.navigation.Routes
 import com.anjira.taskplanner.ui.screens.*
 import com.anjira.taskplanner.ui.theme.TaskPlannerTheme
 import com.anjira.taskplanner.ui.viewmodel.AuthViewModel
-import com.anjira.taskplanner.ui.viewmodel.AuthViewModelFactory
 import com.anjira.taskplanner.ui.viewmodel.GroupViewModel
-import com.anjira.taskplanner.ui.viewmodel.GroupViewModelFactory
 import kotlinx.coroutines.launch
 import retrofit2.HttpException
 
@@ -47,7 +45,7 @@ class MainActivity : ComponentActivity() {
         RetrofitInstance.init(dataStoreManager)
         val apiService = RetrofitInstance.apiService
         val authRepository = AuthRepositoryImpl(apiService, dataStoreManager)
-        val groupRepository = GroupRepositoryImpl(apiService, dataStoreManager)
+        val groupRepository = GroupRepositoryImpl(apiService)
         val authViewModel = AuthViewModel(authRepository)
 
         setContent {
@@ -71,8 +69,12 @@ class MainActivity : ComponentActivity() {
                     val snackbarHostState = remember { SnackbarHostState() }
 
                     LaunchedEffect(Unit) {
-                        val token = dataStoreManager.getAccessToken()
-                        startDestination = if (token != null) Routes.GROUP_LIST else Routes.LOGIN
+                        try {
+                            val token = dataStoreManager.getAccessToken()
+                            startDestination = if (token != null) Routes.GROUP_LIST else Routes.LOGIN
+                        } catch (_: Exception) {
+                            startDestination = Routes.LOGIN
+                        }
                         isLoadingStart = false
                     }
 

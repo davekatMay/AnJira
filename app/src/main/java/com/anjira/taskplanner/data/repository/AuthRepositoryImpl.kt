@@ -2,6 +2,8 @@ package com.anjira.taskplanner.data.repository
 
 import com.anjira.taskplanner.data.local.DataStoreManager
 import com.anjira.taskplanner.data.remote.ApiService
+import com.anjira.taskplanner.data.remote.RetrofitInstance
+import com.anjira.taskplanner.data.remote.dto.LoginRequest
 import com.anjira.taskplanner.data.remote.dto.RefreshRequest
 import com.anjira.taskplanner.data.remote.dto.RegisterRequest
 import com.anjira.taskplanner.domain.model.User
@@ -23,6 +25,7 @@ class AuthRepositoryImpl(
             }
             val authResponse = response.body() ?: throw Exception("Empty response body")
             dataStoreManager.saveTokens(authResponse.accessToken, authResponse.refreshToken)
+            RetrofitInstance.updateToken(authResponse.accessToken)
             dataStoreManager.saveUserInfo(authResponse.userId, authResponse.username, authResponse.email)
             User(authResponse.userId, authResponse.username, authResponse.email)
         }
@@ -30,13 +33,14 @@ class AuthRepositoryImpl(
 
     override suspend fun login(email: String, password: String): User {
         return withContext(Dispatchers.IO) {
-            val request = RegisterRequest(email, password)
+            val request = LoginRequest(email, password)
             val response = apiService.login(request).execute()
             if (!response.isSuccessful) {
                 throw Exception("Login failed: ${response.errorBody()?.string()}")
             }
             val authResponse = response.body() ?: throw Exception("Empty response body")
             dataStoreManager.saveTokens(authResponse.accessToken, authResponse.refreshToken)
+            RetrofitInstance.updateToken(authResponse.accessToken)
             dataStoreManager.saveUserInfo(authResponse.userId, authResponse.username, authResponse.email)
             User(authResponse.userId, authResponse.username, authResponse.email)
         }
@@ -50,9 +54,11 @@ class AuthRepositoryImpl(
             if (response.isSuccessful) {
                 val authResponse = response.body() ?: return@withContext false
                 dataStoreManager.saveTokens(authResponse.accessToken, authResponse.refreshToken)
+                RetrofitInstance.updateToken(authResponse.accessToken)
                 dataStoreManager.saveUserInfo(authResponse.userId, authResponse.username, authResponse.email)
                 true
             } else {
+                RetrofitInstance.updateToken(null)
                 dataStoreManager.clearAll()
                 false
             }
@@ -60,6 +66,7 @@ class AuthRepositoryImpl(
     }
 
     override suspend fun logout() {
+        RetrofitInstance.updateToken(null)
         dataStoreManager.clearAll()
     }
 }

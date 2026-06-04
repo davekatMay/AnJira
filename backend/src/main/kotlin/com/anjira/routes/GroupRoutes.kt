@@ -1,7 +1,6 @@
 package com.anjira.routes
 
 import com.anjira.db.*
-import com.anjira.security.JwtUtil
 import com.anjira.service.FcmNotificationService
 import io.ktor.http.*
 import io.ktor.server.application.*
@@ -711,22 +710,32 @@ fun Route.GroupRoute() {
         getAuthenticatedUserId(call) ?: return@get
         val term = call.request.queryParameters["term"] ?: run { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Search term required")); return@get }
         val limit = call.request.queryParameters["limit"] ?: "20"
-        val response = httpClient.get("https://itunes.apple.com/search") {
-            parameter("term", term)
-            parameter("limit", limit)
-            parameter("entity", "song")
+        try {
+            val response = httpClient.get("https://itunes.apple.com/search") {
+                parameter("term", term)
+                parameter("limit", limit)
+                parameter("entity", "song")
+            }
+            call.respondText(response.bodyAsText(), ContentType.Application.Json)
+        } catch (e: Exception) {
+            logger.error("iTunes search failed", e)
+            call.respond(HttpStatusCode.InternalServerError, mapOf("error" to "iTunes search failed"))
         }
-        call.respondText(response.bodyAsText(), ContentType.Application.Json)
     }
 
     get("/itunes/track/{trackId}") {
         getAuthenticatedUserId(call) ?: return@get
         val trackId = call.parameters["trackId"] ?: run { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Track ID required")); return@get }
-        val response = httpClient.get("https://itunes.apple.com/lookup") {
-            parameter("id", trackId)
-            parameter("entity", "song")
+        try {
+            val response = httpClient.get("https://itunes.apple.com/lookup") {
+                parameter("id", trackId)
+                parameter("entity", "song")
+            }
+            call.respondText(response.bodyAsText(), ContentType.Application.Json)
+        } catch (e: Exception) {
+            logger.error("iTunes track lookup failed", e)
+            call.respond(HttpStatusCode.InternalServerError, mapOf("error" to "iTunes track lookup failed"))
         }
-        call.respondText(response.bodyAsText(), ContentType.Application.Json)
     }
 
     // ─── NOTIFICATIONS ────────────────────────────────────────────────────
@@ -753,7 +762,7 @@ fun Route.GroupRoute() {
 }
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────
-suspend fun getAuthenticatedUserId(call: io.ktor.server.application.ApplicationCall): Int? {
+suspend fun getAuthenticatedUserId(call: ApplicationCall): Int? {
     val principal = call.principal<UserIdPrincipal>()
     if (principal == null) { call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Unauthorized")); return null }
     val userId = principal.name.toIntOrNull()

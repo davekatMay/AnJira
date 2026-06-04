@@ -6,9 +6,7 @@ import io.ktor.server.application.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import org.jetbrains.exposed.dao.id.EntityID
-import org.jetbrains.exposed.dao.id.IdTable
 import org.jetbrains.exposed.sql.*
-import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.transactions.transaction
 import java.time.LocalDateTime
 
@@ -29,7 +27,7 @@ fun Route.SyncRoutes() {
         val userId = getAuthenticatedUserId(call) ?: return@get
         val sinceStr = call.request.queryParameters["since"]
         val syncTime = if (sinceStr != null) {
-            try { LocalDateTime.parse(sinceStr) } catch (e: java.time.format.DateTimeParseException) { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid 'since' date format. Use ISO-8601")); return@get }
+            try { LocalDateTime.parse(sinceStr) } catch (_: java.time.format.DateTimeParseException) { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid 'since' date format. Use ISO-8601")); return@get }
         } else LocalDateTime.MIN
 
         val serverTime = LocalDateTime.now().toString()

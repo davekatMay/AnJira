@@ -15,8 +15,6 @@ import org.jetbrains.exposed.sql.transactions.transaction
 import org.mindrot.jbcrypt.BCrypt
 import org.slf4j.LoggerFactory
 import java.time.LocalDateTime
-import java.util.UUID
-
 private val logger = LoggerFactory.getLogger("AuthRoutes")
 
 data class RegisterRequest(val email: String, val password: String)

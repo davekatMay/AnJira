@@ -11,7 +11,6 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.anjira.taskplanner.MainActivity
-import com.anjira.taskplanner.R
 import com.anjira.taskplanner.data.local.DataStoreManager
 import com.anjira.taskplanner.data.remote.RetrofitInstance
 import com.anjira.taskplanner.data.remote.dto.FcmRegisterRequest
@@ -21,10 +20,6 @@ class FirebaseMessagingService : com.google.firebase.messaging.FirebaseMessaging
 
     companion object {
         const val CHANNEL_ID = "anjira_notifications"
-        const val NOTIFICATION_ID_BASE = 1000
-        private var notifIdCounter = NOTIFICATION_ID_BASE
-
-        fun getNextNotificationId(): Int = notifIdCounter++
     }
 
     override fun onCreate() {
@@ -33,15 +28,13 @@ class FirebaseMessagingService : com.google.firebase.messaging.FirebaseMessaging
     }
 
     override fun onNewToken(token: String) {
-        val dataStoreManager = DataStoreManager(applicationContext)
-        RetrofitInstance.init(dataStoreManager)
         runBlocking {
-            val accessToken = dataStoreManager.getAccessToken()
-            if (accessToken != null) {
-                try {
+            try {
+                val accessToken = DataStoreManager(applicationContext).getAccessToken()
+                if (accessToken != null) {
                     RetrofitInstance.apiService.registerFcmToken(FcmRegisterRequest(token)).execute()
-                } catch (_: Exception) {}
-            }
+                }
+            } catch (_: Exception) {}
         }
     }
 
@@ -69,7 +62,7 @@ class FirebaseMessagingService : com.google.firebase.messaging.FirebaseMessaging
             announcementId?.let { putExtra("nav_announcementId", it) }
         }
 
-        val notifId = System.currentTimeMillis().toInt()
+        val notifId = (System.currentTimeMillis() % Int.MAX_VALUE).toInt()
         val pendingIntent = PendingIntent.getActivity(
             this, notifId, intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
