@@ -16,8 +16,10 @@ import com.anjira.taskplanner.data.remote.RetrofitInstance
 import com.anjira.taskplanner.data.remote.dto.FcmUnregisterRequest
 import com.anjira.taskplanner.domain.repository.GroupRepository
 import com.google.firebase.messaging.FirebaseMessaging
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withContext
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProfileScreen(
@@ -100,9 +102,14 @@ fun ProfileScreen(
                     isLoggingOut = true
                     scope.launch {
                         try {
-                            val fcmToken = FirebaseMessaging.getInstance().token.await()
-                            RetrofitInstance.apiService.unregisterFcmToken(FcmUnregisterRequest(fcmToken)).execute()
+                            val fcmToken = withContext(Dispatchers.IO) {
+                                FirebaseMessaging.getInstance().token.await()
+                            }
+                            withContext(Dispatchers.IO) {
+                                RetrofitInstance.apiService.unregisterFcmToken(FcmUnregisterRequest(fcmToken)).execute()
+                            }
                         } catch (_: Exception) {}
+                        withContext(Dispatchers.IO) { dataStoreManager.clearAll() }
                         onLogout()
                     }
                 },

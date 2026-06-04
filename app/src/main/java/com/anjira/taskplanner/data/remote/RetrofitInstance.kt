@@ -12,6 +12,7 @@ import java.util.concurrent.TimeUnit
 object RetrofitInstance {
     private const val BASE_URL = "http://10.0.2.2:8080/"
     private var dataStoreManager: DataStoreManager? = null
+    private var cachedAccessToken: String? = null
 
     lateinit var apiService: ApiService
         private set
@@ -19,7 +20,12 @@ object RetrofitInstance {
     @Synchronized
     fun init(dataStoreManager: DataStoreManager) {
         this.dataStoreManager = dataStoreManager
+        cachedAccessToken = null
         recreateApiService()
+    }
+
+    fun updateToken(token: String?) {
+        cachedAccessToken = token
     }
 
     private fun recreateApiService() {
@@ -29,10 +35,10 @@ object RetrofitInstance {
 
         val authInterceptor = Interceptor { chain ->
             var request = chain.request()
-            val accessToken = runBlocking { dataStoreManager?.getAccessToken() }
-            if (accessToken != null) {
+            val token = cachedAccessToken ?: runBlocking { dataStoreManager?.getAccessToken() }
+            if (token != null) {
                 request = request.newBuilder()
-                    .header("Authorization", "Bearer $accessToken")
+                    .header("Authorization", "Bearer $token")
                     .build()
             }
             chain.proceed(request)
