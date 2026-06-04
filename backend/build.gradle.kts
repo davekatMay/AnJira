@@ -25,6 +25,9 @@ dependencies {
     implementation("org.mindrot:jbcrypt:0.4")
     implementation("org.flywaydb:flyway-core:9.22.3")
 
+    implementation("com.google.firebase:firebase-admin:9.2.0")
+    implementation("com.google.auth:google-auth-library-oauth2-http:1.22.0")
+
     testImplementation("io.ktor:ktor-server-test-host:2.3.0")
     testImplementation(kotlin("test"))
     testImplementation("io.mockk:mockk:1.13.9")

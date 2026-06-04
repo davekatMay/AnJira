@@ -19,7 +19,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.anjira.taskplanner.domain.model.Group
 import com.anjira.taskplanner.domain.model.GroupMember
-import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -30,7 +29,7 @@ fun GroupListScreen(
     onGroupClick: (Int) -> Unit,
     onCreateGroup: (String, String?, String?) -> Unit,
     onJoinGroup: (String) -> Unit,
-    onLogout: () -> Unit
+    onProfileClick: () -> Unit = {}
 ) {
     var showCreateDialog by remember { mutableStateOf(false) }
     var showJoinDialog by remember { mutableStateOf(false) }
@@ -39,7 +38,6 @@ fun GroupListScreen(
     var newGroupAvatar by remember { mutableStateOf("") }
     var joinCode by remember { mutableStateOf("") }
     val snackbarHostState = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
 
     LaunchedEffect(errorMessage) {
         errorMessage?.let { snackbarHostState.showSnackbar(it) }
@@ -54,8 +52,8 @@ fun GroupListScreen(
                     TextButton(onClick = { showJoinDialog = true }) {
                         Text("Присоединиться")
                     }
-                    IconButton(onClick = onLogout) {
-                        Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = "Выйти")
+                    IconButton(onClick = onProfileClick) {
+                        Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = "Профиль")
                     }
                 }
             )

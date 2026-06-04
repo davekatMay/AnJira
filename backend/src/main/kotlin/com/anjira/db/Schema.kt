@@ -121,3 +121,31 @@ object NotificationTable : IntIdTable("notifications") {
     val isRead: Column<Boolean> = bool("is_read").default(false)
     val createdAt: Column<String> = varchar("created_at", 50)
 }
+
+object FcmTokenTable : Table("fcm_tokens") {
+    val id = integer("id").autoIncrement()
+    val userId: Column<Int> = integer("user_id").references(UserTable.id)
+    val token: Column<String> = varchar("token", 512)
+    val deviceName: Column<String?> = varchar("device_name", 100).nullable()
+    val createdAt: Column<String> = varchar("created_at", 50)
+    val updatedAt: Column<String> = varchar("updated_at", 50)
+    override val primaryKey = PrimaryKey(id)
+    init { uniqueIndex(userId, token) }
+}
+
+object NotificationPreferenceTable : Table("notification_preferences") {
+    val id = integer("id").autoIncrement()
+    val userId: Column<Int> = integer("user_id").references(UserTable.id)
+    val groupId: Column<Int> = integer("group_id").references(GroupTable.id)
+    val taskAssigned: Column<Boolean> = bool("task_assigned").default(true)
+    val taskStatusChanged: Column<Boolean> = bool("task_status_changed").default(true)
+    val meetingCreated: Column<Boolean> = bool("meeting_created").default(true)
+    val meetingReminder: Column<Boolean> = bool("meeting_reminder").default(true)
+    val announcementPosted: Column<Boolean> = bool("announcement_posted").default(true)
+    val groupInvite: Column<Boolean> = bool("group_invite").default(true)
+    val meetingReminderMinutes: Column<Int> = integer("meeting_reminder_minutes").default(30)
+    override val primaryKey = PrimaryKey(id)
+    init { uniqueIndex(userId, groupId) }
+}
+
+

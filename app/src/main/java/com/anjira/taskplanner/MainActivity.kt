@@ -1,10 +1,17 @@
 package com.anjira.taskplanner
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.Alignment
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -17,19 +24,24 @@ import com.anjira.taskplanner.data.repository.AuthRepositoryImpl
 import com.anjira.taskplanner.data.repository.GroupRepositoryImpl
 import com.anjira.taskplanner.domain.model.Group
 import com.anjira.taskplanner.ui.navigation.Routes
-import com.anjira.taskplanner.ui.screens.GroupDetailScreen
-import com.anjira.taskplanner.ui.screens.GroupListScreen
-import com.anjira.taskplanner.ui.screens.LoginScreen
+import com.anjira.taskplanner.ui.screens.*
 import com.anjira.taskplanner.ui.theme.TaskPlannerTheme
 import com.anjira.taskplanner.ui.viewmodel.AuthViewModel
 import com.anjira.taskplanner.ui.viewmodel.AuthViewModelFactory
 import com.anjira.taskplanner.ui.viewmodel.GroupViewModel
 import com.anjira.taskplanner.ui.viewmodel.GroupViewModelFactory
 import kotlinx.coroutines.launch
+import retrofit2.HttpException
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                registerForActivityResult(ActivityResultContracts.RequestPermission()) { }.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
 
         val dataStoreManager = DataStoreManager(applicationContext)
         RetrofitInstance.init(dataStoreManager)
@@ -39,7 +51,15 @@ class MainActivity : ComponentActivity() {
         val authViewModel = AuthViewModel(authRepository)
 
         setContent {
-            TaskPlannerTheme {
+            val themeMode by dataStoreManager.observeThemeMode().collectAsState(initial = "system")
+
+            TaskPlannerTheme(
+                darkTheme = when (themeMode) {
+                    "dark" -> true
+                    "light" -> false
+                    else -> androidx.compose.foundation.isSystemInDarkTheme()
+                }
+            ) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
@@ -47,15 +67,22 @@ class MainActivity : ComponentActivity() {
                     val navController = rememberNavController()
                     val scope = rememberCoroutineScope()
                     var startDestination by remember { mutableStateOf<String?>(null) }
+                    var isLoadingStart by remember { mutableStateOf(true) }
                     val snackbarHostState = remember { SnackbarHostState() }
 
                     LaunchedEffect(Unit) {
                         val token = dataStoreManager.getAccessToken()
                         startDestination = if (token != null) Routes.GROUP_LIST else Routes.LOGIN
+                        isLoadingStart = false
                     }
 
-                    startDestination?.let { start ->
-                        Scaffold(snackbarHost = { SnackbarHost(snackbarHostState) }) { innerPadding ->
+                    if (isLoadingStart) {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator()
+                        }
+                    } else {
+                        startDestination?.let { start ->
+                            Scaffold(snackbarHost = { SnackbarHost(snackbarHostState) }) { innerPadding ->
                             NavHost(
                                 navController = navController,
                                 startDestination = start,
@@ -84,7 +111,7 @@ class MainActivity : ComponentActivity() {
                                             try {
                                                 groups = groupRepository.getUserGroups()
                                             } catch (e: Exception) {
-                                                if (e.message?.contains("401") == true) {
+                                                if (e is HttpException && e.code() == 401) {
                                                     val refreshed = authRepository.refreshToken()
                                                     if (refreshed) {
                                                         try {
@@ -138,32 +165,54 @@ class MainActivity : ComponentActivity() {
                                                 }
                                             }
                                         },
-                                        onLogout = {
-                                            authViewModel.logout()
-                                            navController.navigate(Routes.LOGIN) {
-                                                popUpTo(0) { inclusive = true }
-                                            }
+                                        onProfileClick = {
+                                            navController.navigate(Routes.PROFILE)
                                         }
                                     )
                                 }
 
                                 composable(Routes.GROUP_DETAIL) { backStackEntry ->
-                            val groupId = backStackEntry.arguments?.getString("groupId")?.toIntOrNull() ?: return@composable
-                            val currentUserId by dataStoreManager.observeUserId().collectAsState(-1)
-                            val groupViewModel = remember(groupId, currentUserId) { GroupViewModel(groupRepository, groupId, currentUserId) }
+                                    val groupId = backStackEntry.arguments?.getString("groupId")?.toIntOrNull() ?: return@composable
+                                    val currentUserId by dataStoreManager.observeUserId().collectAsState(-1)
+                                    val groupViewModel = remember(groupId, currentUserId) { GroupViewModel(groupRepository, groupId, currentUserId) }
 
-                            GroupDetailScreen(
-                                groupViewModel = groupViewModel,
-                                groupId = groupId,
-                                currentUserId = currentUserId,
-                                onBack = { navController.popBackStack() }
-                            )
-                        }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
+                                    GroupDetailScreen(
+                                        groupViewModel = groupViewModel,
+                                        groupId = groupId,
+                                        currentUserId = currentUserId,
+                                        onBack = { navController.popBackStack() }
+                                    )
+                                }
+
+                                composable(Routes.PROFILE) {
+                                    ProfileScreen(
+                                        dataStoreManager = dataStoreManager,
+                                        groupRepository = groupRepository,
+                                        onBack = { navController.popBackStack() },
+                                        onLogout = {
+                                            authViewModel.logout()
+                                            navController.navigate(Routes.LOGIN) {
+                                                popUpTo(0) { inclusive = true }
+                                            }
+                                        },
+                                        onOpenSettings = {
+                                            navController.navigate(Routes.NOTIFICATION_SETTINGS)
+                                        }
+                                    )
+                                }
+
+                                composable(Routes.NOTIFICATION_SETTINGS) {
+                                    NotificationSettingsScreen(
+                                        groupRepository = groupRepository,
+                                        onBack = { navController.popBackStack() }
+                                    )
+                             }
+                         }
+                     }
+                 }
+             }
+         }
+     }
+ }
+ }
 }

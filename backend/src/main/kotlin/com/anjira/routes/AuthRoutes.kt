@@ -3,13 +3,12 @@ package com.anjira.routes
 import com.anjira.db.RefreshTokenTable
 import com.anjira.db.UserTable
 import com.anjira.security.JwtUtil
+import com.anjira.util.eqId
 import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
-import org.jetbrains.exposed.dao.id.EntityID
-import org.jetbrains.exposed.dao.id.IdTable
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.transactions.transaction
@@ -22,11 +21,8 @@ private val logger = LoggerFactory.getLogger("AuthRoutes")
 
 data class RegisterRequest(val email: String, val password: String)
 data class LoginRequest(val email: String, val password: String)
-data class AuthResponse(val accessToken: String, val refreshToken: String, val userId: Int, val username: String)
+data class AuthResponse(val accessToken: String, val refreshToken: String, val userId: Int, val username: String, val email: String)
 data class RefreshRequest(val refreshToken: String)
-
-private infix fun <T : Comparable<T>> Column<EntityID<T>>.eqId(value: T): Op<Boolean> =
-    eq(EntityID(value, table as IdTable<T>))
 
 fun hashPassword(password: String): String = BCrypt.hashpw(password, BCrypt.gensalt())
 
@@ -63,7 +59,7 @@ fun Route.AuthRoute() {
             saveRefreshToken(newUserId.value, refreshToken)
 
             logger.info("User registered successfully: ${newUserId.value}")
-            call.respond(HttpStatusCode.Created, AuthResponse(accessToken, refreshToken, newUserId.value, username))
+            call.respond(HttpStatusCode.Created, AuthResponse(accessToken, refreshToken, newUserId.value, username, request.email))
         }
 
         post("/login") {
@@ -89,7 +85,7 @@ fun Route.AuthRoute() {
             saveRefreshToken(userId, refreshToken)
 
             logger.info("User logged in successfully: $userId")
-            call.respond(AuthResponse(accessToken, refreshToken, userId, username))
+            call.respond(AuthResponse(accessToken, refreshToken, userId, username, user[UserTable.email]))
         }
 
         post("/refresh") {
@@ -109,9 +105,9 @@ fun Route.AuthRoute() {
             }
 
             val stored = transaction {
-                RefreshTokenTable.select { RefreshTokenTable.userId eq userId }
-                    .adjustWhere { RefreshTokenTable.token eq request.refreshToken }
-                    .firstOrNull()
+                RefreshTokenTable.select {
+                    (RefreshTokenTable.userId eq userId) and (RefreshTokenTable.token eq request.refreshToken)
+                }.firstOrNull()
             }
 
             if (stored == null) {
@@ -135,7 +131,7 @@ fun Route.AuthRoute() {
             }
             saveRefreshToken(userId, newRefreshToken)
 
-            call.respond(AuthResponse(newAccessToken, newRefreshToken, userId, username))
+            call.respond(AuthResponse(newAccessToken, newRefreshToken, userId, username, user[UserTable.email]))
         }
     }
 }

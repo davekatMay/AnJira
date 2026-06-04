@@ -2,6 +2,7 @@ package com.anjira.routes
 
 import com.anjira.db.*
 import com.anjira.security.JwtUtil
+import com.anjira.service.FcmNotificationService
 import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.request.*
@@ -13,8 +14,8 @@ import io.ktor.client.*
 import io.ktor.client.engine.cio.*
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
+import com.anjira.util.eqId
 import org.jetbrains.exposed.dao.id.EntityID
-import org.jetbrains.exposed.dao.id.IdTable
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.inList
@@ -29,7 +30,7 @@ private val httpClient = HttpClient(CIO)
 // ─── Group DTOs ───────────────────────────────────────────────────────────
 data class GroupCreateRequest(val name: String, val description: String? = null, val avatar: String? = null)
 data class GroupUpdateRequest(val name: String? = null, val description: String? = null, val avatar: String? = null)
-data class GroupMemberResponse(val userId: Int, val username: String, val email: String, val role: String, val createdAt: String, val updatedAt: String)
+data class GroupMemberResponse(val userId: Int, val groupId: Int, val username: String, val email: String, val role: String, val createdAt: String, val updatedAt: String)
 data class GroupResponse(val id: Int, val name: String, val description: String?, val avatar: String?, val inviteCode: String, val createdBy: String, val members: List<GroupMemberResponse>, val createdAt: String, val updatedAt: String)
 data class AddMemberRequest(val userId: Int, val role: String = "member")
 data class UpdateRoleRequest(val role: String)
@@ -38,7 +39,7 @@ data class JoinByCodeRequest(val inviteCode: String)
 // ─── Task DTOs ────────────────────────────────────────────────────────────
 data class TaskCreateRequest(val title: String, val description: String? = null, val deadline: String? = null, val assignedTo: Int? = null)
 data class TaskUpdateRequest(val title: String? = null, val description: String? = null, val deadline: String? = null, val status: String? = null, val assignedTo: Int? = null)
-data class TaskResponse(val id: Int, val title: String, val description: String?, val deadline: String?, val status: String, val createdBy: Int, val assignedTo: Int?, val createdAt: String, val updatedAt: String)
+data class TaskResponse(val id: Int, val groupId: Int, val title: String, val description: String?, val deadline: String?, val status: String, val createdBy: Int, val assignedTo: Int?, val createdAt: String, val updatedAt: String)
 
 // ─── Subtask DTOs ─────────────────────────────────────────────────────────
 data class SubtaskCreateRequest(val title: String)
@@ -47,7 +48,7 @@ data class SubtaskResponse(val id: Int, val title: String, val isCompleted: Bool
 // ─── Meeting DTOs ─────────────────────────────────────────────────────────
 data class MeetingCreateRequest(val title: String, val description: String? = null, val dateTime: String, val endDateTime: String? = null, val location: String? = null, val invitedUserIds: List<Int> = emptyList())
 data class MeetingUpdateRequest(val title: String? = null, val description: String? = null, val dateTime: String? = null, val endDateTime: String? = null, val location: String? = null)
-data class MeetingResponse(val id: Int, val title: String, val description: String?, val dateTime: String, val endDateTime: String?, val location: String?, val createdBy: Int, val createdAt: String, val updatedAt: String, val myRsvp: String? = null)
+data class MeetingResponse(val id: Int, val groupId: Int, val title: String, val description: String?, val dateTime: String, val endDateTime: String?, val location: String?, val createdBy: Int, val createdAt: String, val updatedAt: String, val myRsvp: String? = null)
 data class MeetingParticipantResponse(val userId: Int, val username: String, val email: String, val status: String, val createdAt: String? = null, val updatedAt: String? = null)
 data class AddParticipantRequest(val userId: Int)
 data class RsvpRequest(val status: String) // going, maybe, declined
@@ -85,7 +86,7 @@ fun Route.GroupRoute() {
                 }
             }
             transaction { GroupMemberTable.insert { m -> m[GroupMemberTable.groupId] = groupId.value; m[GroupMemberTable.userId] = userId; m[GroupMemberTable.role] = "admin"; m[GroupMemberTable.createdAt] = now; m[GroupMemberTable.updatedAt] = now } }
-            call.respond(HttpStatusCode.Created, GroupResponse(groupId.value, request.name, request.description, request.avatar, inviteCode, getUsername(userId), listOf(GroupMemberResponse(userId, getUsername(userId), getEmail(userId), "admin", now, now)), now, now))
+            call.respond(HttpStatusCode.Created, GroupResponse(groupId.value, request.name, request.description, request.avatar, inviteCode, getUsername(userId), listOf(GroupMemberResponse(userId, groupId.value, getUsername(userId), getEmail(userId), "admin", now, now)), now, now))
         }
 
         get {
@@ -102,7 +103,17 @@ fun Route.GroupRoute() {
             val groupId = group[GroupTable.id].value
             if (transaction { GroupMemberTable.select { (GroupMemberTable.groupId eq groupId) and (GroupMemberTable.userId eq userId) }.firstOrNull() } != null) { call.respond(HttpStatusCode.Conflict, mapOf("error" to "Already a member")); return@post }
             val now = LocalDateTime.now().toString()
+            val username = getUsername(userId)
             transaction { GroupMemberTable.insert { m -> m[GroupMemberTable.groupId] = groupId; m[GroupMemberTable.userId] = userId; m[GroupMemberTable.role] = "member"; m[GroupMemberTable.createdAt] = now; m[GroupMemberTable.updatedAt] = now } }
+            val adminIds = transaction { GroupMemberTable.select { (GroupMemberTable.groupId eq groupId) and (GroupMemberTable.role eq "admin") }.map { it[GroupMemberTable.userId] } }
+            val groupName = group[GroupTable.name]
+            adminIds.forEach { adminId ->
+                createNotification(adminId, "group_invite", groupId, "Пользователь $username присоединился к группе «$groupName»")
+                if (FcmNotificationService.shouldNotify(adminId, groupId, "group_invite")) {
+                    FcmNotificationService.sendPushNotification(adminId, "Новый участник", "$username присоединился к группе «$groupName»",
+                        mapOf("type" to "group", "groupId" to groupId.toString()))
+                }
+            }
             call.respond(group.toGroupResponse())
         }
 
@@ -117,18 +128,21 @@ fun Route.GroupRoute() {
         put("/{groupId}") {
             val userId = getAuthenticatedUserId(call) ?: return@put
             val groupId = call.parameters["groupId"]?.toIntOrNull() ?: run { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid group ID")); return@put }
+            if (transaction { GroupTable.select { GroupTable.id eqId groupId }.firstOrNull() } == null) { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Group not found")); return@put }
             if (!isAdmin(groupId, userId)) { call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Only admin can edit group")); return@put }
-            val request = call.receive<GroupUpdateRequest>()
-            val group = transaction { GroupTable.select { GroupTable.id eqId groupId }.firstOrNull() } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Group not found")); return@put }
+            val req = call.receive<GroupUpdateRequest>()
             val now = LocalDateTime.now().toString()
-            transaction { GroupTable.update({ GroupTable.id eqId groupId }) { upd -> request.name?.let { upd[GroupTable.name] = it }; request.description?.let { upd[GroupTable.description] = it }; request.avatar?.let { upd[GroupTable.avatar] = it }; upd[GroupTable.updatedAt] = now } }
-            val updated = transaction { GroupTable.select { GroupTable.id eqId groupId }.firstOrNull()!! }
+            val updated = transaction {
+                GroupTable.update({ GroupTable.id eqId groupId }) { upd -> req.name?.let { upd[GroupTable.name] = it }; req.description?.let { upd[GroupTable.description] = it }; req.avatar?.let { upd[GroupTable.avatar] = it }; upd[GroupTable.updatedAt] = now }
+                GroupTable.select { GroupTable.id eqId groupId }.firstOrNull()
+            } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Group not found")); return@put }
             call.respond(updated.toGroupResponse())
         }
 
         delete("/{groupId}") {
             val userId = getAuthenticatedUserId(call) ?: return@delete
             val groupId = call.parameters["groupId"]?.toIntOrNull() ?: run { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid group ID")); return@delete }
+            if (transaction { GroupTable.select { GroupTable.id eqId groupId }.firstOrNull() } == null) { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Group not found")); return@delete }
             if (!isAdmin(groupId, userId)) { call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Only admin can delete group")); return@delete }
             transaction {
                 PlaylistTrackTable.deleteWhere { PlaylistTrackTable.playlistId inList PlaylistTable.select { PlaylistTable.groupId eq groupId }.map { it[PlaylistTable.id].value } }
@@ -139,6 +153,7 @@ fun Route.GroupRoute() {
                 SubtaskTable.deleteWhere { SubtaskTable.taskId inList TaskTable.select { TaskTable.groupId eq groupId }.map { it[TaskTable.id].value } }
                 TaskTable.deleteWhere { TaskTable.groupId eq groupId }
                 GroupMemberTable.deleteWhere { GroupMemberTable.groupId eq groupId }
+                NotificationPreferenceTable.deleteWhere { NotificationPreferenceTable.groupId eq groupId }
                 GroupTable.deleteWhere { GroupTable.id eqId groupId }
             }
             call.respond(HttpStatusCode.NoContent)
@@ -151,6 +166,7 @@ fun Route.GroupRoute() {
             if (!isAdmin(groupId, userId)) { call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Only admin can add members")); return@post }
             val request = call.receive<AddMemberRequest>()
             if (transaction { GroupMemberTable.select { (GroupMemberTable.groupId eq groupId) and (GroupMemberTable.userId eq request.userId) }.firstOrNull() } != null) { call.respond(HttpStatusCode.Conflict, mapOf("error" to "Already a member")); return@post }
+            if (transaction { UserTable.select { UserTable.id eqId request.userId }.firstOrNull() } == null) { call.respond(HttpStatusCode.NotFound, mapOf("error" to "User not found")); return@post }
             val now = LocalDateTime.now().toString()
             transaction { GroupMemberTable.insert { m -> m[GroupMemberTable.groupId] = groupId; m[GroupMemberTable.userId] = request.userId; m[GroupMemberTable.role] = request.role; m[GroupMemberTable.createdAt] = now; m[GroupMemberTable.updatedAt] = now } }
             call.respond(HttpStatusCode.Created, mapOf("message" to "Member added"))
@@ -162,6 +178,9 @@ fun Route.GroupRoute() {
             val memberId = call.parameters["memberId"]?.toIntOrNull() ?: run { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid member ID")); return@delete }
             if (!isAdmin(groupId, userId)) { call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Only admin can remove members")); return@delete }
             if (userId == memberId) { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Cannot remove yourself")); return@delete }
+            val adminCount = transaction { GroupMemberTable.select { (GroupMemberTable.groupId eq groupId) and (GroupMemberTable.role eq "admin") }.count() }
+            val isTargetAdmin = transaction { GroupMemberTable.select { (GroupMemberTable.groupId eq groupId) and (GroupMemberTable.userId eq memberId) and (GroupMemberTable.role eq "admin") }.firstOrNull() != null }
+            if (isTargetAdmin && adminCount <= 1) { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Cannot remove the last admin")); return@delete }
             transaction { GroupMemberTable.deleteWhere { (GroupMemberTable.groupId eq groupId) and (GroupMemberTable.userId eq memberId) } }
             call.respond(HttpStatusCode.NoContent)
         }
@@ -173,6 +192,10 @@ fun Route.GroupRoute() {
             if (!isAdmin(groupId, userId)) { call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Only admin can change roles")); return@put }
             val request = call.receive<UpdateRoleRequest>()
             if (request.role !in listOf("admin", "member")) { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid role")); return@put }
+            if (request.role == "member" && transaction { GroupMemberTable.select { (GroupMemberTable.groupId eq groupId) and (GroupMemberTable.userId eq memberId) and (GroupMemberTable.role eq "admin") }.firstOrNull() } != null) {
+                val adminCount = transaction { GroupMemberTable.select { (GroupMemberTable.groupId eq groupId) and (GroupMemberTable.role eq "admin") }.count() }
+                if (adminCount <= 1) { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Cannot demote the last admin")); return@put }
+            }
             val now = LocalDateTime.now().toString()
             transaction { GroupMemberTable.update({ (GroupMemberTable.groupId eq groupId) and (GroupMemberTable.userId eq memberId) }) { it[GroupMemberTable.role] = request.role; it[GroupMemberTable.updatedAt] = now } }
             call.respond(mapOf("message" to "Role updated"))
@@ -212,8 +235,14 @@ fun Route.GroupRoute() {
                     it[TaskTable.assignedTo] = request.assignedTo; it[TaskTable.createdAt] = now; it[TaskTable.updatedAt] = now
                 }
             }
-            request.assignedTo?.let { createNotification(it, "task_assigned", taskId.value, "Вам назначена задача: ${request.title}") }
-            call.respond(HttpStatusCode.Created, TaskResponse(taskId.value, request.title, request.description, request.deadline, "to_do", userId, request.assignedTo, now, now))
+            request.assignedTo?.let { assigned ->
+                createNotification(assigned, "task_assigned", taskId.value, "Вам назначена задача: ${request.title}")
+                if (FcmNotificationService.shouldNotify(assigned, groupId, "task_assigned")) {
+                    FcmNotificationService.sendPushNotification(assigned, "Новая задача", request.title,
+                        mapOf("type" to "task", "groupId" to groupId.toString(), "taskId" to taskId.value.toString()))
+                }
+            }
+            call.respond(HttpStatusCode.Created, TaskResponse(taskId.value, groupId, request.title, request.description, request.deadline, "to_do", userId, request.assignedTo, now, now))
         }
     }
 
@@ -224,8 +253,9 @@ fun Route.GroupRoute() {
             val task = transaction { TaskTable.select { TaskTable.id eqId taskId }.firstOrNull() } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Task not found")); return@put }
             if (!isMember(task[TaskTable.groupId], userId)) { call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Not a member")); return@put }
             val request = call.receive<TaskUpdateRequest>()
+            val oldStatus = task[TaskTable.status]
             val now = LocalDateTime.now().toString()
-            transaction {
+            val updated = transaction {
                 TaskTable.update({ TaskTable.id eqId taskId }) { upd ->
                     request.title?.let { upd[TaskTable.title] = it }
                     request.description?.let { upd[TaskTable.description] = it }
@@ -234,8 +264,28 @@ fun Route.GroupRoute() {
                     request.assignedTo?.let { upd[TaskTable.assignedTo] = it }
                     upd[TaskTable.updatedAt] = now
                 }
+                TaskTable.select { TaskTable.id eqId taskId }.firstOrNull()
+            } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Task not found")); return@put }
+            if (request.status != null && request.status != oldStatus) {
+                val assignee = updated[TaskTable.assignedTo]
+                val creator = updated[TaskTable.createdBy]
+                val groupId = updated[TaskTable.groupId]
+                val msg = "Статус задачи «${updated[TaskTable.title]}» изменён на ${request.status}"
+                if (creator != userId) {
+                    createNotification(creator, "task_status_changed", taskId, msg)
+                    if (FcmNotificationService.shouldNotify(creator, groupId, "task_status_changed")) {
+                        FcmNotificationService.sendPushNotification(creator, "Статус задачи изменён", msg,
+                            mapOf("type" to "task", "groupId" to groupId.toString(), "taskId" to taskId.toString()))
+                    }
+                }
+                if (assignee != null && assignee != creator && assignee != userId) {
+                    createNotification(assignee, "task_status_changed", taskId, msg)
+                    if (FcmNotificationService.shouldNotify(assignee, groupId, "task_status_changed")) {
+                        FcmNotificationService.sendPushNotification(assignee, "Статус задачи изменён", msg,
+                            mapOf("type" to "task", "groupId" to groupId.toString(), "taskId" to taskId.toString()))
+                    }
+                }
             }
-            val updated = transaction { TaskTable.select { TaskTable.id eqId taskId }.firstOrNull()!! }
             call.respond(updated.toTaskResponse())
         }
 
@@ -280,8 +330,10 @@ fun Route.GroupRoute() {
             if (!isMember(task[TaskTable.groupId], userId)) { call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Not a member")); return@put }
             val isCompleted = call.request.queryParameters["isCompleted"]?.toBoolean()
             val now = LocalDateTime.now().toString()
-            transaction { SubtaskTable.update({ SubtaskTable.id eqId subtaskId }) { upd -> isCompleted?.let { upd[SubtaskTable.isCompleted] = it }; upd[SubtaskTable.updatedAt] = now } }
-            val updated = transaction { SubtaskTable.select { SubtaskTable.id eqId subtaskId }.firstOrNull()!! }
+            val updated = transaction {
+                SubtaskTable.update({ SubtaskTable.id eqId subtaskId }) { upd -> isCompleted?.let { upd[SubtaskTable.isCompleted] = it }; upd[SubtaskTable.updatedAt] = now }
+                SubtaskTable.select { SubtaskTable.id eqId subtaskId }.firstOrNull()
+            } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Subtask not found")); return@put }
             call.respond(SubtaskResponse(subtaskId, updated[SubtaskTable.title], updated[SubtaskTable.isCompleted], updated[SubtaskTable.createdAt], updated[SubtaskTable.updatedAt]))
         }
     }
@@ -325,7 +377,17 @@ fun Route.GroupRoute() {
                 }
                 mid
             }
-            call.respond(MeetingResponse(meetingId.value, request.title, request.description, request.dateTime, request.endDateTime, request.location, userId, now, now))
+            val meetingTitle = request.title
+            request.invitedUserIds.forEach { invitedId ->
+                if (invitedId != userId) {
+                    createNotification(invitedId, "meeting_created", meetingId.value, "Новая встреча: $meetingTitle")
+                    if (FcmNotificationService.shouldNotify(invitedId, groupId, "meeting_created")) {
+                        FcmNotificationService.sendPushNotification(invitedId, "Новая встреча", meetingTitle,
+                            mapOf("type" to "meeting", "groupId" to groupId.toString(), "meetingId" to meetingId.value.toString()))
+                    }
+                }
+            }
+            call.respond(MeetingResponse(meetingId.value, groupId, meetingTitle, request.description, request.dateTime, request.endDateTime, request.location, userId, now, now))
         }
     }
 
@@ -337,7 +399,7 @@ fun Route.GroupRoute() {
             if (!isMember(meeting[MeetingTable.groupId], userId)) { call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Not a member")); return@put }
             val request = call.receive<MeetingUpdateRequest>()
             val now = LocalDateTime.now().toString()
-            transaction {
+            val updated = transaction {
                 MeetingTable.update({ MeetingTable.id eqId meetingId }) { upd ->
                     request.title?.let { upd[MeetingTable.title] = it }
                     request.description?.let { upd[MeetingTable.description] = it }
@@ -346,8 +408,8 @@ fun Route.GroupRoute() {
                     request.location?.let { upd[MeetingTable.location] = it }
                     upd[MeetingTable.updatedAt] = now
                 }
-            }
-            val updated = transaction { MeetingTable.select { MeetingTable.id eqId meetingId }.firstOrNull()!! }
+                MeetingTable.select { MeetingTable.id eqId meetingId }.firstOrNull()
+            } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Meeting not found")); return@put }
             call.respond(updated.toMeetingResponse())
         }
 
@@ -356,7 +418,12 @@ fun Route.GroupRoute() {
             val meetingId = call.parameters["meetingId"]?.toIntOrNull() ?: run { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid meeting ID")); return@delete }
             val mid = meetingId; val groupId = transaction { MeetingTable.select { MeetingTable.id eqId mid }.firstOrNull()?.get(MeetingTable.groupId) } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Meeting not found")); return@delete }
             if (!isMember(groupId, userId)) { call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Not a member")); return@delete }
-            transaction { MeetingParticipantTable.deleteWhere { MeetingParticipantTable.meetingId eq mid }; MeetingTable.deleteWhere { MeetingTable.id eqId mid } }
+            transaction {
+                PlaylistTrackTable.deleteWhere { PlaylistTrackTable.playlistId inList PlaylistTable.select { PlaylistTable.meetingId eq mid }.map { it[PlaylistTable.id].value } }
+                PlaylistTable.deleteWhere { PlaylistTable.meetingId eq mid }
+                MeetingParticipantTable.deleteWhere { MeetingParticipantTable.meetingId eq mid }
+                MeetingTable.deleteWhere { MeetingTable.id eqId mid }
+            }
             call.respond(HttpStatusCode.NoContent)
         }
     }
@@ -377,6 +444,8 @@ fun Route.GroupRoute() {
             val groupId = transaction { MeetingTable.select { MeetingTable.id eqId meetingId }.firstOrNull()?.get(MeetingTable.groupId) } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Meeting not found")); return@post }
             if (!isMember(groupId, userId)) { call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Not a member")); return@post }
             val request = call.receive<AddParticipantRequest>()
+            if (!isMember(groupId, request.userId)) { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "User is not a group member")); return@post }
+            if (transaction { MeetingParticipantTable.select { (MeetingParticipantTable.meetingId eq meetingId) and (MeetingParticipantTable.userId eq request.userId) }.firstOrNull() } != null) { call.respond(HttpStatusCode.Conflict, mapOf("error" to "Already a participant")); return@post }
             val now = LocalDateTime.now().toString()
             transaction {
                 MeetingParticipantTable.insert { m -> m[MeetingParticipantTable.meetingId] = meetingId; m[MeetingParticipantTable.userId] = request.userId; m[MeetingParticipantTable.status] = "pending"; m[MeetingParticipantTable.createdAt] = now; m[MeetingParticipantTable.updatedAt] = now }
@@ -448,6 +517,14 @@ fun Route.GroupRoute() {
                     it[AnnouncementTable.createdAt] = now; it[AnnouncementTable.updatedAt] = now
                 }
             }
+            val memberIds = transaction { GroupMemberTable.select { GroupMemberTable.groupId eq groupId }.map { it[GroupMemberTable.userId] } }
+            memberIds.filter { it != userId }.forEach { memberId ->
+                createNotification(memberId, "announcement_posted", annId.value, "Новое объявление: ${request.text.take(100)}")
+                if (FcmNotificationService.shouldNotify(memberId, groupId, "announcement_posted")) {
+                    FcmNotificationService.sendPushNotification(memberId, "Новое объявление",
+                        request.text.take(100), mapOf("type" to "announcement", "groupId" to groupId.toString(), "announcementId" to annId.value.toString()))
+                }
+            }
             call.respond(HttpStatusCode.Created, AnnouncementResponse(annId.value, groupId, request.text, request.attachments, false, userId, getUsername(userId), now, now))
         }
     }
@@ -464,8 +541,10 @@ fun Route.GroupRoute() {
             if (userId != authorId && !isGroupAdmin) { call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Only author or admin can edit")); return@put }
             val request = call.receive<AnnouncementUpdateRequest>()
             val now = LocalDateTime.now().toString()
-            transaction { AnnouncementTable.update({ AnnouncementTable.id eqId annId }) { upd -> request.text?.let { upd[AnnouncementTable.text] = it }; request.attachments?.let { upd[AnnouncementTable.attachments] = it }; upd[AnnouncementTable.updatedAt] = now } }
-            val updated = transaction { (AnnouncementTable innerJoin UserTable).select { AnnouncementTable.id eqId annId }.firstOrNull()!! }
+            val updated = transaction {
+                AnnouncementTable.update({ AnnouncementTable.id eqId annId }) { upd -> request.text?.let { upd[AnnouncementTable.text] = it }; request.attachments?.let { upd[AnnouncementTable.attachments] = it }; upd[AnnouncementTable.updatedAt] = now }
+                (AnnouncementTable innerJoin UserTable).select { AnnouncementTable.id eqId annId }.firstOrNull()
+            } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Announcement not found")); return@put }
             call.respond(updated.toAnnouncementResponse(groupId))
         }
 
@@ -579,15 +658,17 @@ fun Route.GroupRoute() {
             if (!isMember(pl[PlaylistTable.groupId], userId)) { call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Not a member")); return@post }
             val request = call.receive<AddTrackRequest>()
             val now = LocalDateTime.now().toString()
-            val maxOrder = transaction { PlaylistTrackTable.select { PlaylistTrackTable.playlistId eq plId }.maxOfOrNull { it[PlaylistTrackTable.sortOrder] } ?: 0 }
-            val trId = transaction {
-                PlaylistTrackTable.insertAndGetId {
+            val (trId, maxOrder) = transaction {
+                val maxO = PlaylistTrackTable.select { PlaylistTrackTable.playlistId eq plId }.maxOfOrNull { it[PlaylistTrackTable.sortOrder] } ?: 0
+                val id = PlaylistTrackTable.insertAndGetId {
                     it[PlaylistTrackTable.playlistId] = plId; it[PlaylistTrackTable.trackId] = request.trackId
                     it[PlaylistTrackTable.trackName] = request.trackName; it[PlaylistTrackTable.artistName] = request.artistName
                     it[PlaylistTrackTable.trackViewUrl] = request.trackViewUrl; it[PlaylistTrackTable.artworkUrl100] = request.artworkUrl100
-                    it[PlaylistTrackTable.previewUrl] = request.previewUrl; it[PlaylistTrackTable.sortOrder] = maxOrder + 1
+                    it[PlaylistTrackTable.previewUrl] = request.previewUrl; it[PlaylistTrackTable.sortOrder] = maxO + 1
                     it[PlaylistTrackTable.createdAt] = now
                 }
+                PlaylistTable.update({ PlaylistTable.id eqId plId }) { it[PlaylistTable.updatedAt] = now }
+                id to maxO
             }
             call.respond(HttpStatusCode.Created, TrackResponse(trId.value, plId, request.trackId, request.trackName, request.artistName, request.trackViewUrl, request.artworkUrl100, request.previewUrl, maxOrder + 1, now))
         }
@@ -600,7 +681,11 @@ fun Route.GroupRoute() {
             val trId = call.parameters["trackId"]?.toIntOrNull() ?: run { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid track ID")); return@delete }
             val pl = transaction { PlaylistTable.select { PlaylistTable.id eqId plId }.firstOrNull() } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Playlist not found")); return@delete }
             if (!isMember(pl[PlaylistTable.groupId], userId)) { call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Not a member")); return@delete }
-            transaction { PlaylistTrackTable.deleteWhere { (PlaylistTrackTable.playlistId eq plId) and (PlaylistTrackTable.id eqId trId) } }
+            val now = LocalDateTime.now().toString()
+            transaction {
+                PlaylistTrackTable.deleteWhere { (PlaylistTrackTable.playlistId eq plId) and (PlaylistTrackTable.id eqId trId) }
+                PlaylistTable.update({ PlaylistTable.id eqId plId }) { it[PlaylistTable.updatedAt] = now }
+            }
             call.respond(HttpStatusCode.NoContent)
         }
     }
@@ -611,17 +696,19 @@ fun Route.GroupRoute() {
         val pl = transaction { PlaylistTable.select { PlaylistTable.id eqId plId }.firstOrNull() } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Playlist not found")); return@put }
         if (!isMember(pl[PlaylistTable.groupId], userId)) { call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Not a member")); return@put }
         val request = call.receive<ReorderTracksRequest>()
+        val now = LocalDateTime.now().toString()
         transaction {
             request.trackIds.forEachIndexed { index, trackId ->
                 PlaylistTrackTable.update({ (PlaylistTrackTable.playlistId eq plId) and (PlaylistTrackTable.id eqId trackId) }) { upd -> upd[PlaylistTrackTable.sortOrder] = index + 1 }
             }
+            PlaylistTable.update({ PlaylistTable.id eqId plId }) { it[PlaylistTable.updatedAt] = now }
         }
         call.respond(mapOf("message" to "Tracks reordered"))
     }
 
     // ─── iTunes SEARCH ────────────────────────────────────────────────────
     get("/itunes/search") {
-        val userId = getAuthenticatedUserId(call) ?: return@get
+        getAuthenticatedUserId(call) ?: return@get
         val term = call.request.queryParameters["term"] ?: run { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Search term required")); return@get }
         val limit = call.request.queryParameters["limit"] ?: "20"
         val response = httpClient.get("https://itunes.apple.com/search") {
@@ -633,7 +720,7 @@ fun Route.GroupRoute() {
     }
 
     get("/itunes/track/{trackId}") {
-        val userId = getAuthenticatedUserId(call) ?: return@get
+        getAuthenticatedUserId(call) ?: return@get
         val trackId = call.parameters["trackId"] ?: run { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Track ID required")); return@get }
         val response = httpClient.get("https://itunes.apple.com/lookup") {
             parameter("id", trackId)
@@ -665,9 +752,6 @@ fun Route.GroupRoute() {
     }
 }
 
-private infix fun <T : Comparable<T>> Column<EntityID<T>>.eqId(value: T): Op<Boolean> =
-    eq(EntityID(value, table as IdTable<T>))
-
 // ─── HELPERS ──────────────────────────────────────────────────────────────
 suspend fun getAuthenticatedUserId(call: io.ktor.server.application.ApplicationCall): Int? {
     val principal = call.principal<UserIdPrincipal>()
@@ -684,7 +768,7 @@ private fun isAdmin(groupId: Int, userId: Int): Boolean =
     transaction { GroupMemberTable.select { (GroupMemberTable.groupId eq groupId) and (GroupMemberTable.userId eq userId) and (GroupMemberTable.role eq "admin") }.firstOrNull() != null }
 
 private fun getGroupMembers(groupId: Int): List<GroupMemberResponse> =
-    transaction { (GroupMemberTable innerJoin UserTable).select { GroupMemberTable.groupId eq groupId }.map { row -> GroupMemberResponse(row[UserTable.id].value, row[UserTable.username], row[UserTable.email], row[GroupMemberTable.role], row[GroupMemberTable.createdAt], row[GroupMemberTable.updatedAt]) } }
+    transaction { (GroupMemberTable innerJoin UserTable).select { GroupMemberTable.groupId eq groupId }.map { row -> GroupMemberResponse(row[UserTable.id].value, row[GroupMemberTable.groupId], row[UserTable.username], row[UserTable.email], row[GroupMemberTable.role], row[GroupMemberTable.createdAt], row[GroupMemberTable.updatedAt]) } }
 
 private fun getUsername(userId: Int): String =
     transaction { UserTable.select { UserTable.id eqId userId }.firstOrNull()?.get(UserTable.username) ?: "unknown" }
@@ -700,26 +784,28 @@ private fun createNotification(userId: Int, type: String, referenceId: Int, mess
 }
 
 // ─── Extension mappers ────────────────────────────────────────────────────
-private fun ResultRow.toGroupResponse(): GroupResponse {
+internal fun ResultRow.toGroupResponse(): GroupResponse {
     val gId = this[GroupTable.id].value
     return GroupResponse(gId, this[GroupTable.name], this[GroupTable.description], this[GroupTable.avatar],
         this[GroupTable.inviteCode], getUsername(this[GroupTable.createdBy]), getGroupMembers(gId),
         this[GroupTable.createdAt], this[GroupTable.updatedAt])
 }
 
-private fun ResultRow.toTaskResponse(): TaskResponse {
-    return TaskResponse(this[TaskTable.id].value, this[TaskTable.title], this[TaskTable.description],
-        this[TaskTable.deadline], this[TaskTable.status], this[TaskTable.createdBy],
-        this[TaskTable.assignedTo], this[TaskTable.createdAt], this[TaskTable.updatedAt])
+internal fun ResultRow.toTaskResponse(): TaskResponse {
+    return TaskResponse(this[TaskTable.id].value, this[TaskTable.groupId], this[TaskTable.title],
+        this[TaskTable.description], this[TaskTable.deadline], this[TaskTable.status],
+        this[TaskTable.createdBy], this[TaskTable.assignedTo],
+        this[TaskTable.createdAt], this[TaskTable.updatedAt])
 }
 
-private fun ResultRow.toMeetingResponse(myRsvp: String? = null): MeetingResponse {
-    return MeetingResponse(this[MeetingTable.id].value, this[MeetingTable.title], this[MeetingTable.description],
+internal fun ResultRow.toMeetingResponse(myRsvp: String? = null): MeetingResponse {
+    return MeetingResponse(this[MeetingTable.id].value, this[MeetingTable.groupId],
+        this[MeetingTable.title], this[MeetingTable.description],
         this[MeetingTable.dateTime], this[MeetingTable.endDateTime], this[MeetingTable.location],
         this[MeetingTable.createdBy], this[MeetingTable.createdAt], this[MeetingTable.updatedAt], myRsvp)
 }
 
-private fun ResultRow.toAnnouncementResponse(groupId: Int): AnnouncementResponse {
+internal fun ResultRow.toAnnouncementResponse(groupId: Int): AnnouncementResponse {
     return AnnouncementResponse(this[AnnouncementTable.id].value, groupId, this[AnnouncementTable.text],
         this[AnnouncementTable.attachments], this[AnnouncementTable.isPinned],
         this[AnnouncementTable.createdBy], this[UserTable.username],

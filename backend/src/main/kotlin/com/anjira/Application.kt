@@ -5,6 +5,9 @@ import com.auth0.jwt.algorithms.Algorithm
 import com.anjira.config.DatabaseConfig
 import com.anjira.routes.AuthRoute
 import com.anjira.routes.GroupRoute
+import com.anjira.routes.NotificationRoutes
+import com.anjira.routes.SyncRoutes
+import com.anjira.service.FcmNotificationService
 import io.ktor.server.application.*
 import io.ktor.server.auth.*
 import io.ktor.server.auth.jwt.*
@@ -26,6 +29,7 @@ fun main() {
 
     embeddedServer(Netty, port = 8080, host = "0.0.0.0") {
         DatabaseConfig.init()
+        FcmNotificationService.init()
 
         install(ContentNegotiation) {
             gson {}
@@ -50,6 +54,8 @@ fun main() {
             AuthRoute()
             authenticate("jwt") {
                 GroupRoute()
+                NotificationRoutes()
+                SyncRoutes()
             }
         }
 

@@ -5,4 +5,6 @@ object Routes {
     const val GROUP_LIST = "group_list"
     const val GROUP_DETAIL = "group_detail/{groupId}"
     fun groupDetail(groupId: Int) = "group_detail/$groupId"
+    const val PROFILE = "profile"
+    const val NOTIFICATION_SETTINGS = "notification_settings"
 }
