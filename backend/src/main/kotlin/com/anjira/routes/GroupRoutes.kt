@@ -13,6 +13,8 @@ import io.ktor.client.*
 import io.ktor.client.engine.cio.*
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
+import org.jetbrains.exposed.dao.id.EntityID
+import org.jetbrains.exposed.dao.id.IdTable
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.inList
@@ -43,10 +45,10 @@ data class SubtaskCreateRequest(val title: String)
 data class SubtaskResponse(val id: Int, val title: String, val isCompleted: Boolean, val createdAt: String, val updatedAt: String)
 
 // ─── Meeting DTOs ─────────────────────────────────────────────────────────
-data class MeetingCreateRequest(val title: String, val description: String? = null, val dateTime: String, val endDateTime: String? = null, val location: String? = null)
+data class MeetingCreateRequest(val title: String, val description: String? = null, val dateTime: String, val endDateTime: String? = null, val location: String? = null, val invitedUserIds: List<Int> = emptyList())
 data class MeetingUpdateRequest(val title: String? = null, val description: String? = null, val dateTime: String? = null, val endDateTime: String? = null, val location: String? = null)
-data class MeetingResponse(val id: Int, val title: String, val description: String?, val dateTime: String, val endDateTime: String?, val location: String?, val createdBy: Int, val createdAt: String, val updatedAt: String)
-data class MeetingParticipantResponse(val userId: Int, val username: String, val email: String)
+data class MeetingResponse(val id: Int, val title: String, val description: String?, val dateTime: String, val endDateTime: String?, val location: String?, val createdBy: Int, val createdAt: String, val updatedAt: String, val myRsvp: String? = null)
+data class MeetingParticipantResponse(val userId: Int, val username: String, val email: String, val status: String, val createdAt: String? = null, val updatedAt: String? = null)
 data class AddParticipantRequest(val userId: Int)
 data class RsvpRequest(val status: String) // going, maybe, declined
 
@@ -89,7 +91,7 @@ fun Route.GroupRoute() {
         get {
             val userId = getAuthenticatedUserId(call) ?: return@get
             val groupIds = transaction { GroupMemberTable.select { GroupMemberTable.userId eq userId }.map { it[GroupMemberTable.groupId] } }
-            call.respond(transaction { GroupTable.select { GroupTable.id inList groupIds }.map { row -> row.toGroupResponse() } })
+            call.respond(transaction { GroupTable.select { GroupTable.id inList groupIds.map { EntityID(it, GroupTable) } }.map { row -> row.toGroupResponse() } })
         }
 
         post("/join") {
@@ -108,7 +110,7 @@ fun Route.GroupRoute() {
             val userId = getAuthenticatedUserId(call) ?: return@get
             val groupId = call.parameters["groupId"]?.toIntOrNull() ?: run { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid group ID")); return@get }
             if (!isMember(groupId, userId)) { call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Not a member")); return@get }
-            val group = transaction { GroupTable.select { GroupTable.id eq groupId }.firstOrNull() } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Group not found")); return@get }
+            val group = transaction { GroupTable.select { GroupTable.id eqId groupId }.firstOrNull() } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Group not found")); return@get }
             call.respond(group.toGroupResponse())
         }
 
@@ -117,10 +119,10 @@ fun Route.GroupRoute() {
             val groupId = call.parameters["groupId"]?.toIntOrNull() ?: run { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid group ID")); return@put }
             if (!isAdmin(groupId, userId)) { call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Only admin can edit group")); return@put }
             val request = call.receive<GroupUpdateRequest>()
-            val group = transaction { GroupTable.select { GroupTable.id eq groupId }.firstOrNull() } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Group not found")); return@put }
+            val group = transaction { GroupTable.select { GroupTable.id eqId groupId }.firstOrNull() } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Group not found")); return@put }
             val now = LocalDateTime.now().toString()
-            transaction { GroupTable.update({ GroupTable.id eq groupId }) { upd -> request.name?.let { upd[GroupTable.name] = it }; upd[GroupTable.description] = request.description; upd[GroupTable.avatar] = request.avatar; upd[GroupTable.updatedAt] = now } }
-            val updated = transaction { GroupTable.select { GroupTable.id eq groupId }.firstOrNull()!! }
+            transaction { GroupTable.update({ GroupTable.id eqId groupId }) { upd -> request.name?.let { upd[GroupTable.name] = it }; request.description?.let { upd[GroupTable.description] = it }; request.avatar?.let { upd[GroupTable.avatar] = it }; upd[GroupTable.updatedAt] = now } }
+            val updated = transaction { GroupTable.select { GroupTable.id eqId groupId }.firstOrNull()!! }
             call.respond(updated.toGroupResponse())
         }
 
@@ -129,12 +131,15 @@ fun Route.GroupRoute() {
             val groupId = call.parameters["groupId"]?.toIntOrNull() ?: run { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid group ID")); return@delete }
             if (!isAdmin(groupId, userId)) { call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Only admin can delete group")); return@delete }
             transaction {
+                PlaylistTrackTable.deleteWhere { PlaylistTrackTable.playlistId inList PlaylistTable.select { PlaylistTable.groupId eq groupId }.map { it[PlaylistTable.id].value } }
+                PlaylistTable.deleteWhere { PlaylistTable.groupId eq groupId }
+                AnnouncementTable.deleteWhere { AnnouncementTable.groupId eq groupId }
                 MeetingParticipantTable.deleteWhere { MeetingParticipantTable.meetingId inList MeetingTable.select { MeetingTable.groupId eq groupId }.map { it[MeetingTable.id].value } }
                 MeetingTable.deleteWhere { MeetingTable.groupId eq groupId }
                 SubtaskTable.deleteWhere { SubtaskTable.taskId inList TaskTable.select { TaskTable.groupId eq groupId }.map { it[TaskTable.id].value } }
                 TaskTable.deleteWhere { TaskTable.groupId eq groupId }
                 GroupMemberTable.deleteWhere { GroupMemberTable.groupId eq groupId }
-                GroupTable.deleteWhere { GroupTable.id eq groupId }
+                GroupTable.deleteWhere { GroupTable.id eqId groupId }
             }
             call.respond(HttpStatusCode.NoContent)
         }
@@ -208,7 +213,7 @@ fun Route.GroupRoute() {
                 }
             }
             request.assignedTo?.let { createNotification(it, "task_assigned", taskId.value, "Вам назначена задача: ${request.title}") }
-            call.respond(TaskResponse(taskId.value, request.title, request.description, request.deadline, "to_do", userId, request.assignedTo, now, now))
+            call.respond(HttpStatusCode.Created, TaskResponse(taskId.value, request.title, request.description, request.deadline, "to_do", userId, request.assignedTo, now, now))
         }
     }
 
@@ -216,30 +221,30 @@ fun Route.GroupRoute() {
         put {
             val userId = getAuthenticatedUserId(call) ?: return@put
             val taskId = call.parameters["taskId"]?.toIntOrNull() ?: run { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid task ID")); return@put }
-            val task = transaction { TaskTable.select { TaskTable.id eq taskId }.firstOrNull() } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Task not found")); return@put }
+            val task = transaction { TaskTable.select { TaskTable.id eqId taskId }.firstOrNull() } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Task not found")); return@put }
             if (!isMember(task[TaskTable.groupId], userId)) { call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Not a member")); return@put }
             val request = call.receive<TaskUpdateRequest>()
             val now = LocalDateTime.now().toString()
             transaction {
-                TaskTable.update({ TaskTable.id eq taskId }) { upd ->
+                TaskTable.update({ TaskTable.id eqId taskId }) { upd ->
                     request.title?.let { upd[TaskTable.title] = it }
-                    upd[TaskTable.description] = request.description
-                    upd[TaskTable.deadline] = request.deadline
+                    request.description?.let { upd[TaskTable.description] = it }
+                    request.deadline?.let { upd[TaskTable.deadline] = it }
                     request.status?.let { upd[TaskTable.status] = it }
-                    upd[TaskTable.assignedTo] = request.assignedTo
+                    request.assignedTo?.let { upd[TaskTable.assignedTo] = it }
                     upd[TaskTable.updatedAt] = now
                 }
             }
-            val updated = transaction { TaskTable.select { TaskTable.id eq taskId }.firstOrNull()!! }
+            val updated = transaction { TaskTable.select { TaskTable.id eqId taskId }.firstOrNull()!! }
             call.respond(updated.toTaskResponse())
         }
 
         delete {
             val userId = getAuthenticatedUserId(call) ?: return@delete
             val taskId = call.parameters["taskId"]?.toIntOrNull() ?: run { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid task ID")); return@delete }
-            val task = transaction { TaskTable.select { TaskTable.id eq taskId }.firstOrNull() } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Task not found")); return@delete }
+            val task = transaction { TaskTable.select { TaskTable.id eqId taskId }.firstOrNull() } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Task not found")); return@delete }
             if (!isMember(task[TaskTable.groupId], userId)) { call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Not a member")); return@delete }
-            transaction { SubtaskTable.deleteWhere { SubtaskTable.taskId eq taskId }; TaskTable.deleteWhere { TaskTable.id eq taskId } }
+            transaction { SubtaskTable.deleteWhere { SubtaskTable.taskId eq taskId }; TaskTable.deleteWhere { TaskTable.id eqId taskId } }
             call.respond(HttpStatusCode.NoContent)
         }
     }
@@ -249,7 +254,7 @@ fun Route.GroupRoute() {
         get {
             val userId = getAuthenticatedUserId(call) ?: return@get
             val taskId = call.parameters["taskId"]?.toIntOrNull() ?: run { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid task ID")); return@get }
-            val task = transaction { TaskTable.select { TaskTable.id eq taskId }.firstOrNull() } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Task not found")); return@get }
+            val task = transaction { TaskTable.select { TaskTable.id eqId taskId }.firstOrNull() } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Task not found")); return@get }
             if (!isMember(task[TaskTable.groupId], userId)) { call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Not a member")); return@get }
             call.respond(transaction { SubtaskTable.select { SubtaskTable.taskId eq taskId }.map { row -> SubtaskResponse(row[SubtaskTable.id].value, row[SubtaskTable.title], row[SubtaskTable.isCompleted], row[SubtaskTable.createdAt], row[SubtaskTable.updatedAt]) } })
         }
@@ -257,12 +262,12 @@ fun Route.GroupRoute() {
         post {
             val userId = getAuthenticatedUserId(call) ?: return@post
             val taskId = call.parameters["taskId"]?.toIntOrNull() ?: run { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid task ID")); return@post }
-            val task = transaction { TaskTable.select { TaskTable.id eq taskId }.firstOrNull() } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Task not found")); return@post }
+            val task = transaction { TaskTable.select { TaskTable.id eqId taskId }.firstOrNull() } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Task not found")); return@post }
             if (!isMember(task[TaskTable.groupId], userId)) { call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Not a member")); return@post }
             val request = call.receive<SubtaskCreateRequest>()
             val now = LocalDateTime.now().toString()
             val subtaskId = transaction { SubtaskTable.insertAndGetId { s -> s[SubtaskTable.taskId] = taskId; s[SubtaskTable.title] = request.title; s[SubtaskTable.isCompleted] = false; s[SubtaskTable.createdAt] = now; s[SubtaskTable.updatedAt] = now } }
-            call.respond(SubtaskResponse(subtaskId.value, request.title, false, now, now))
+            call.respond(HttpStatusCode.Created, SubtaskResponse(subtaskId.value, request.title, false, now, now))
         }
     }
 
@@ -270,13 +275,13 @@ fun Route.GroupRoute() {
         put {
             val userId = getAuthenticatedUserId(call) ?: return@put
             val subtaskId = call.parameters["subtaskId"]?.toIntOrNull() ?: run { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid subtask ID")); return@put }
-            val subtask = transaction { SubtaskTable.select { SubtaskTable.id eq subtaskId }.firstOrNull() } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Subtask not found")); return@put }
-            val task = transaction { TaskTable.select { TaskTable.id eq subtask[SubtaskTable.taskId] }.firstOrNull() } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Task not found")); return@put }
+            val subtask = transaction { SubtaskTable.select { SubtaskTable.id eqId subtaskId }.firstOrNull() } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Subtask not found")); return@put }
+            val task = transaction { TaskTable.select { TaskTable.id eqId subtask[SubtaskTable.taskId] }.firstOrNull() } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Task not found")); return@put }
             if (!isMember(task[TaskTable.groupId], userId)) { call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Not a member")); return@put }
             val isCompleted = call.request.queryParameters["isCompleted"]?.toBoolean()
             val now = LocalDateTime.now().toString()
-            transaction { SubtaskTable.update({ SubtaskTable.id eq subtaskId }) { upd -> isCompleted?.let { upd[SubtaskTable.isCompleted] = it }; upd[SubtaskTable.updatedAt] = now } }
-            val updated = transaction { SubtaskTable.select { SubtaskTable.id eq subtaskId }.firstOrNull()!! }
+            transaction { SubtaskTable.update({ SubtaskTable.id eqId subtaskId }) { upd -> isCompleted?.let { upd[SubtaskTable.isCompleted] = it }; upd[SubtaskTable.updatedAt] = now } }
+            val updated = transaction { SubtaskTable.select { SubtaskTable.id eqId subtaskId }.firstOrNull()!! }
             call.respond(SubtaskResponse(subtaskId, updated[SubtaskTable.title], updated[SubtaskTable.isCompleted], updated[SubtaskTable.createdAt], updated[SubtaskTable.updatedAt]))
         }
     }
@@ -287,7 +292,13 @@ fun Route.GroupRoute() {
             val userId = getAuthenticatedUserId(call) ?: return@get
             val groupId = call.parameters["groupId"]?.toIntOrNull() ?: run { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid group ID")); return@get }
             if (!isMember(groupId, userId)) { call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Not a member")); return@get }
-            call.respond(transaction { MeetingTable.select { MeetingTable.groupId eq groupId }.orderBy(MeetingTable.dateTime, SortOrder.ASC).map { it.toMeetingResponse() } })
+            call.respond(transaction {
+                MeetingTable.select { MeetingTable.groupId eq groupId }.orderBy(MeetingTable.dateTime, SortOrder.ASC).map { row ->
+                    val mid = row[MeetingTable.id].value
+                    val rsvp = MeetingParticipantTable.select { (MeetingParticipantTable.meetingId eq mid) and (MeetingParticipantTable.userId eq userId) }.firstOrNull()?.get(MeetingParticipantTable.status)
+                    row.toMeetingResponse(rsvp)
+                }
+            })
         }
 
         post {
@@ -297,12 +308,22 @@ fun Route.GroupRoute() {
             val request = call.receive<MeetingCreateRequest>()
             val now = LocalDateTime.now().toString()
             val meetingId = transaction {
-                MeetingTable.insertAndGetId {
+                val mid = MeetingTable.insertAndGetId {
                     it[MeetingTable.groupId] = groupId; it[MeetingTable.title] = request.title
                     it[MeetingTable.description] = request.description; it[MeetingTable.dateTime] = request.dateTime
                     it[MeetingTable.endDateTime] = request.endDateTime; it[MeetingTable.location] = request.location
                     it[MeetingTable.createdBy] = userId; it[MeetingTable.createdAt] = now; it[MeetingTable.updatedAt] = now
                 }
+                request.invitedUserIds.forEach { invitedId ->
+                    MeetingParticipantTable.insert { m ->
+                        m[MeetingParticipantTable.meetingId] = mid.value
+                        m[MeetingParticipantTable.userId] = invitedId
+                        m[MeetingParticipantTable.status] = "pending"
+                        m[MeetingParticipantTable.createdAt] = now
+                        m[MeetingParticipantTable.updatedAt] = now
+                    }
+                }
+                mid
             }
             call.respond(MeetingResponse(meetingId.value, request.title, request.description, request.dateTime, request.endDateTime, request.location, userId, now, now))
         }
@@ -312,27 +333,30 @@ fun Route.GroupRoute() {
         put {
             val userId = getAuthenticatedUserId(call) ?: return@put
             val meetingId = call.parameters["meetingId"]?.toIntOrNull() ?: run { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid meeting ID")); return@put }
-            val meeting = transaction { MeetingTable.select { MeetingTable.id eq meetingId }.firstOrNull() } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Meeting not found")); return@put }
+            val meeting = transaction { MeetingTable.select { MeetingTable.id eqId meetingId }.firstOrNull() } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Meeting not found")); return@put }
             if (!isMember(meeting[MeetingTable.groupId], userId)) { call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Not a member")); return@put }
             val request = call.receive<MeetingUpdateRequest>()
             val now = LocalDateTime.now().toString()
             transaction {
-                MeetingTable.update({ MeetingTable.id eq meetingId }) { upd ->
-                    request.title?.let { upd[MeetingTable.title] = it }; upd[MeetingTable.description] = request.description
-                    request.dateTime?.let { upd[MeetingTable.dateTime] = it }; upd[MeetingTable.endDateTime] = request.endDateTime
-                    upd[MeetingTable.location] = request.location; upd[MeetingTable.updatedAt] = now
+                MeetingTable.update({ MeetingTable.id eqId meetingId }) { upd ->
+                    request.title?.let { upd[MeetingTable.title] = it }
+                    request.description?.let { upd[MeetingTable.description] = it }
+                    request.dateTime?.let { upd[MeetingTable.dateTime] = it }
+                    request.endDateTime?.let { upd[MeetingTable.endDateTime] = it }
+                    request.location?.let { upd[MeetingTable.location] = it }
+                    upd[MeetingTable.updatedAt] = now
                 }
             }
-            val updated = transaction { MeetingTable.select { MeetingTable.id eq meetingId }.firstOrNull()!! }
+            val updated = transaction { MeetingTable.select { MeetingTable.id eqId meetingId }.firstOrNull()!! }
             call.respond(updated.toMeetingResponse())
         }
 
         delete {
             val userId = getAuthenticatedUserId(call) ?: return@delete
             val meetingId = call.parameters["meetingId"]?.toIntOrNull() ?: run { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid meeting ID")); return@delete }
-            val mid = meetingId; val groupId = transaction { MeetingTable.select { MeetingTable.id eq mid }.firstOrNull()?.get(MeetingTable.groupId) } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Meeting not found")); return@delete }
+            val mid = meetingId; val groupId = transaction { MeetingTable.select { MeetingTable.id eqId mid }.firstOrNull()?.get(MeetingTable.groupId) } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Meeting not found")); return@delete }
             if (!isMember(groupId, userId)) { call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Not a member")); return@delete }
-            transaction { MeetingParticipantTable.deleteWhere { MeetingParticipantTable.meetingId eq mid }; MeetingTable.deleteWhere { MeetingTable.id eq mid } }
+            transaction { MeetingParticipantTable.deleteWhere { MeetingParticipantTable.meetingId eq mid }; MeetingTable.deleteWhere { MeetingTable.id eqId mid } }
             call.respond(HttpStatusCode.NoContent)
         }
     }
@@ -342,15 +366,15 @@ fun Route.GroupRoute() {
         get {
             val userId = getAuthenticatedUserId(call) ?: return@get
             val meetingId = call.parameters["meetingId"]?.toIntOrNull() ?: run { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid meeting ID")); return@get }
-            val groupId = transaction { MeetingTable.select { MeetingTable.id eq meetingId }.firstOrNull()?.get(MeetingTable.groupId) } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Meeting not found")); return@get }
+            val groupId = transaction { MeetingTable.select { MeetingTable.id eqId meetingId }.firstOrNull()?.get(MeetingTable.groupId) } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Meeting not found")); return@get }
             if (!isMember(groupId, userId)) { call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Not a member")); return@get }
-            call.respond(transaction { (MeetingParticipantTable innerJoin UserTable).select { MeetingParticipantTable.meetingId eq meetingId }.map { row -> MeetingParticipantResponse(row[UserTable.id].value, row[UserTable.username], row[UserTable.email]) } })
+            call.respond(transaction { (MeetingParticipantTable innerJoin UserTable).select { MeetingParticipantTable.meetingId eq meetingId }.map { row -> MeetingParticipantResponse(row[UserTable.id].value, row[UserTable.username], row[UserTable.email], row[MeetingParticipantTable.status], row[MeetingParticipantTable.createdAt], row[MeetingParticipantTable.updatedAt]) } })
         }
 
         post {
             val userId = getAuthenticatedUserId(call) ?: return@post
             val meetingId = call.parameters["meetingId"]?.toIntOrNull() ?: run { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid meeting ID")); return@post }
-            val groupId = transaction { MeetingTable.select { MeetingTable.id eq meetingId }.firstOrNull()?.get(MeetingTable.groupId) } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Meeting not found")); return@post }
+            val groupId = transaction { MeetingTable.select { MeetingTable.id eqId meetingId }.firstOrNull()?.get(MeetingTable.groupId) } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Meeting not found")); return@post }
             if (!isMember(groupId, userId)) { call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Not a member")); return@post }
             val request = call.receive<AddParticipantRequest>()
             val now = LocalDateTime.now().toString()
@@ -364,7 +388,7 @@ fun Route.GroupRoute() {
             val userId = getAuthenticatedUserId(call) ?: return@delete
             val meetingId = call.parameters["meetingId"]?.toIntOrNull() ?: run { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid IDs")); return@delete }
             val targetUserId = call.parameters["participantId"]?.toIntOrNull() ?: run { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid participant ID")); return@delete }
-            val groupId = transaction { MeetingTable.select { MeetingTable.id eq meetingId }.firstOrNull()?.get(MeetingTable.groupId) } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Meeting not found")); return@delete }
+            val groupId = transaction { MeetingTable.select { MeetingTable.id eqId meetingId }.firstOrNull()?.get(MeetingTable.groupId) } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Meeting not found")); return@delete }
             if (!isMember(groupId, userId)) { call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Not a member")); return@delete }
             transaction { MeetingParticipantTable.deleteWhere { (MeetingParticipantTable.meetingId eq meetingId) and (MeetingParticipantTable.userId eq targetUserId) } }
             call.respond(HttpStatusCode.NoContent)
@@ -432,7 +456,7 @@ fun Route.GroupRoute() {
         put {
             val userId = getAuthenticatedUserId(call) ?: return@put
             val annId = call.parameters["announcementId"]?.toIntOrNull() ?: run { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid announcement ID")); return@put }
-            val ann = transaction { AnnouncementTable.select { AnnouncementTable.id eq annId }.firstOrNull() }
+            val ann = transaction { AnnouncementTable.select { AnnouncementTable.id eqId annId }.firstOrNull() }
             if (ann == null) { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Announcement not found")); return@put }
             val groupId = ann[AnnouncementTable.groupId]
             val authorId = ann[AnnouncementTable.createdBy]
@@ -440,31 +464,31 @@ fun Route.GroupRoute() {
             if (userId != authorId && !isGroupAdmin) { call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Only author or admin can edit")); return@put }
             val request = call.receive<AnnouncementUpdateRequest>()
             val now = LocalDateTime.now().toString()
-            transaction { AnnouncementTable.update({ AnnouncementTable.id eq annId }) { upd -> request.text?.let { upd[AnnouncementTable.text] = it }; request.attachments?.let { upd[AnnouncementTable.attachments] = it }; upd[AnnouncementTable.updatedAt] = now } }
-            val updated = transaction { (AnnouncementTable innerJoin UserTable).select { AnnouncementTable.id eq annId }.firstOrNull()!! }
+            transaction { AnnouncementTable.update({ AnnouncementTable.id eqId annId }) { upd -> request.text?.let { upd[AnnouncementTable.text] = it }; request.attachments?.let { upd[AnnouncementTable.attachments] = it }; upd[AnnouncementTable.updatedAt] = now } }
+            val updated = transaction { (AnnouncementTable innerJoin UserTable).select { AnnouncementTable.id eqId annId }.firstOrNull()!! }
             call.respond(updated.toAnnouncementResponse(groupId))
         }
 
         delete {
             val userId = getAuthenticatedUserId(call) ?: return@delete
             val annId = call.parameters["announcementId"]?.toIntOrNull() ?: run { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid announcement ID")); return@delete }
-            val ann = transaction { AnnouncementTable.select { AnnouncementTable.id eq annId }.firstOrNull() } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Announcement not found")); return@delete }
+            val ann = transaction { AnnouncementTable.select { AnnouncementTable.id eqId annId }.firstOrNull() } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Announcement not found")); return@delete }
             val groupId = ann[AnnouncementTable.groupId]
             val authorId = ann[AnnouncementTable.createdBy]
             val isGroupAdmin = transaction { GroupMemberTable.select { (GroupMemberTable.groupId eq groupId) and (GroupMemberTable.userId eq userId) and (GroupMemberTable.role eq "admin") }.firstOrNull() != null }
             if (userId != authorId && !isGroupAdmin) { call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Only author or admin can delete")); return@delete }
-            transaction { AnnouncementTable.deleteWhere { AnnouncementTable.id eq annId } }
+            transaction { AnnouncementTable.deleteWhere { AnnouncementTable.id eqId annId } }
             call.respond(HttpStatusCode.NoContent)
         }
 
         put("/pin") {
             val userId = getAuthenticatedUserId(call) ?: return@put
             val annId = call.parameters["announcementId"]?.toIntOrNull() ?: run { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid announcement ID")); return@put }
-            val ann = transaction { AnnouncementTable.select { AnnouncementTable.id eq annId }.firstOrNull() } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Announcement not found")); return@put }
+            val ann = transaction { AnnouncementTable.select { AnnouncementTable.id eqId annId }.firstOrNull() } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Announcement not found")); return@put }
             val groupId = ann[AnnouncementTable.groupId]
             if (!isAdmin(groupId, userId)) { call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Only admin can pin announcements")); return@put }
             val now = LocalDateTime.now().toString()
-            transaction { AnnouncementTable.update({ AnnouncementTable.id eq annId }) { upd -> upd[AnnouncementTable.isPinned] = !ann[AnnouncementTable.isPinned]; upd[AnnouncementTable.updatedAt] = now } }
+            transaction { AnnouncementTable.update({ AnnouncementTable.id eqId annId }) { upd -> upd[AnnouncementTable.isPinned] = !ann[AnnouncementTable.isPinned]; upd[AnnouncementTable.updatedAt] = now } }
             call.respond(mapOf("message" to "Pin status toggled"))
         }
     }
@@ -509,20 +533,20 @@ fun Route.GroupRoute() {
         put {
             val userId = getAuthenticatedUserId(call) ?: return@put
             val plId = call.parameters["playlistId"]?.toIntOrNull() ?: run { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid playlist ID")); return@put }
-            val pl = transaction { PlaylistTable.select { PlaylistTable.id eq plId }.firstOrNull() } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Playlist not found")); return@put }
+            val pl = transaction { PlaylistTable.select { PlaylistTable.id eqId plId }.firstOrNull() } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Playlist not found")); return@put }
             if (!isMember(pl[PlaylistTable.groupId], userId)) { call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Not a member")); return@put }
             val request = call.receive<PlaylistUpdateRequest>()
             val now = LocalDateTime.now().toString()
-            transaction { PlaylistTable.update({ PlaylistTable.id eq plId }) { upd -> request.name?.let { upd[PlaylistTable.name] = it }; upd[PlaylistTable.updatedAt] = now } }
+            transaction { PlaylistTable.update({ PlaylistTable.id eqId plId }) { upd -> request.name?.let { upd[PlaylistTable.name] = it }; upd[PlaylistTable.updatedAt] = now } }
             call.respond(mapOf("message" to "Playlist updated"))
         }
 
         delete {
             val userId = getAuthenticatedUserId(call) ?: return@delete
             val plId = call.parameters["playlistId"]?.toIntOrNull() ?: run { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid playlist ID")); return@delete }
-            val pl = transaction { PlaylistTable.select { PlaylistTable.id eq plId }.firstOrNull() } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Playlist not found")); return@delete }
+            val pl = transaction { PlaylistTable.select { PlaylistTable.id eqId plId }.firstOrNull() } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Playlist not found")); return@delete }
             if (!isMember(pl[PlaylistTable.groupId], userId)) { call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Not a member")); return@delete }
-            transaction { PlaylistTrackTable.deleteWhere { PlaylistTrackTable.playlistId eq plId }; PlaylistTable.deleteWhere { PlaylistTable.id eq plId } }
+            transaction { PlaylistTrackTable.deleteWhere { PlaylistTrackTable.playlistId eq plId }; PlaylistTable.deleteWhere { PlaylistTable.id eqId plId } }
             call.respond(HttpStatusCode.NoContent)
         }
     }
@@ -532,7 +556,7 @@ fun Route.GroupRoute() {
         get {
             val userId = getAuthenticatedUserId(call) ?: return@get
             val plId = call.parameters["playlistId"]?.toIntOrNull() ?: run { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid playlist ID")); return@get }
-            val pl = transaction { PlaylistTable.select { PlaylistTable.id eq plId }.firstOrNull() } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Playlist not found")); return@get }
+            val pl = transaction { PlaylistTable.select { PlaylistTable.id eqId plId }.firstOrNull() } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Playlist not found")); return@get }
             if (!isMember(pl[PlaylistTable.groupId], userId)) { call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Not a member")); return@get }
             val tracks = transaction {
                 PlaylistTrackTable.select { PlaylistTrackTable.playlistId eq plId }
@@ -551,7 +575,7 @@ fun Route.GroupRoute() {
         post {
             val userId = getAuthenticatedUserId(call) ?: return@post
             val plId = call.parameters["playlistId"]?.toIntOrNull() ?: run { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid playlist ID")); return@post }
-            val pl = transaction { PlaylistTable.select { PlaylistTable.id eq plId }.firstOrNull() } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Playlist not found")); return@post }
+            val pl = transaction { PlaylistTable.select { PlaylistTable.id eqId plId }.firstOrNull() } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Playlist not found")); return@post }
             if (!isMember(pl[PlaylistTable.groupId], userId)) { call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Not a member")); return@post }
             val request = call.receive<AddTrackRequest>()
             val now = LocalDateTime.now().toString()
@@ -574,9 +598,9 @@ fun Route.GroupRoute() {
             val userId = getAuthenticatedUserId(call) ?: return@delete
             val plId = call.parameters["playlistId"]?.toIntOrNull() ?: run { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid playlist ID")); return@delete }
             val trId = call.parameters["trackId"]?.toIntOrNull() ?: run { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid track ID")); return@delete }
-            val pl = transaction { PlaylistTable.select { PlaylistTable.id eq plId }.firstOrNull() } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Playlist not found")); return@delete }
+            val pl = transaction { PlaylistTable.select { PlaylistTable.id eqId plId }.firstOrNull() } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Playlist not found")); return@delete }
             if (!isMember(pl[PlaylistTable.groupId], userId)) { call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Not a member")); return@delete }
-            transaction { PlaylistTrackTable.deleteWhere { (PlaylistTrackTable.playlistId eq plId) and (PlaylistTrackTable.id eq trId) } }
+            transaction { PlaylistTrackTable.deleteWhere { (PlaylistTrackTable.playlistId eq plId) and (PlaylistTrackTable.id eqId trId) } }
             call.respond(HttpStatusCode.NoContent)
         }
     }
@@ -584,12 +608,12 @@ fun Route.GroupRoute() {
     put("/playlists/{playlistId}/tracks/reorder") {
         val userId = getAuthenticatedUserId(call) ?: return@put
         val plId = call.parameters["playlistId"]?.toIntOrNull() ?: run { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid playlist ID")); return@put }
-        val pl = transaction { PlaylistTable.select { PlaylistTable.id eq plId }.firstOrNull() } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Playlist not found")); return@put }
+        val pl = transaction { PlaylistTable.select { PlaylistTable.id eqId plId }.firstOrNull() } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Playlist not found")); return@put }
         if (!isMember(pl[PlaylistTable.groupId], userId)) { call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Not a member")); return@put }
         val request = call.receive<ReorderTracksRequest>()
         transaction {
             request.trackIds.forEachIndexed { index, trackId ->
-                PlaylistTrackTable.update({ (PlaylistTrackTable.playlistId eq plId) and (PlaylistTrackTable.id eq trackId) }) { upd -> upd[PlaylistTrackTable.sortOrder] = index + 1 }
+                PlaylistTrackTable.update({ (PlaylistTrackTable.playlistId eq plId) and (PlaylistTrackTable.id eqId trackId) }) { upd -> upd[PlaylistTrackTable.sortOrder] = index + 1 }
             }
         }
         call.respond(mapOf("message" to "Tracks reordered"))
@@ -603,6 +627,16 @@ fun Route.GroupRoute() {
         val response = httpClient.get("https://itunes.apple.com/search") {
             parameter("term", term)
             parameter("limit", limit)
+            parameter("entity", "song")
+        }
+        call.respondText(response.bodyAsText(), ContentType.Application.Json)
+    }
+
+    get("/itunes/track/{trackId}") {
+        val userId = getAuthenticatedUserId(call) ?: return@get
+        val trackId = call.parameters["trackId"] ?: run { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Track ID required")); return@get }
+        val response = httpClient.get("https://itunes.apple.com/lookup") {
+            parameter("id", trackId)
             parameter("entity", "song")
         }
         call.respondText(response.bodyAsText(), ContentType.Application.Json)
@@ -626,10 +660,13 @@ fun Route.GroupRoute() {
     put("/notifications/{notificationId}/read") {
         val userId = getAuthenticatedUserId(call) ?: return@put
         val notId = call.parameters["notificationId"]?.toIntOrNull() ?: run { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid notification ID")); return@put }
-        transaction { NotificationTable.update({ (NotificationTable.id eq notId) and (NotificationTable.userId eq userId) }) { upd -> upd[NotificationTable.isRead] = true } }
+        transaction { NotificationTable.update({ (NotificationTable.id eqId notId) and (NotificationTable.userId eq userId) }) { upd -> upd[NotificationTable.isRead] = true } }
         call.respond(mapOf("message" to "Notification marked as read"))
     }
 }
+
+private infix fun <T : Comparable<T>> Column<EntityID<T>>.eqId(value: T): Op<Boolean> =
+    eq(EntityID(value, table as IdTable<T>))
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────
 suspend fun getAuthenticatedUserId(call: io.ktor.server.application.ApplicationCall): Int? {
@@ -650,10 +687,10 @@ private fun getGroupMembers(groupId: Int): List<GroupMemberResponse> =
     transaction { (GroupMemberTable innerJoin UserTable).select { GroupMemberTable.groupId eq groupId }.map { row -> GroupMemberResponse(row[UserTable.id].value, row[UserTable.username], row[UserTable.email], row[GroupMemberTable.role], row[GroupMemberTable.createdAt], row[GroupMemberTable.updatedAt]) } }
 
 private fun getUsername(userId: Int): String =
-    transaction { UserTable.select { UserTable.id eq userId }.firstOrNull()?.get(UserTable.username) ?: "unknown" }
+    transaction { UserTable.select { UserTable.id eqId userId }.firstOrNull()?.get(UserTable.username) ?: "unknown" }
 
 private fun getEmail(userId: Int): String =
-    transaction { UserTable.select { UserTable.id eq userId }.firstOrNull()?.get(UserTable.email) ?: "unknown" }
+    transaction { UserTable.select { UserTable.id eqId userId }.firstOrNull()?.get(UserTable.email) ?: "unknown" }
 
 private fun generateInviteCode(): String =
     UUID.randomUUID().toString().take(8).uppercase()
@@ -676,10 +713,10 @@ private fun ResultRow.toTaskResponse(): TaskResponse {
         this[TaskTable.assignedTo], this[TaskTable.createdAt], this[TaskTable.updatedAt])
 }
 
-private fun ResultRow.toMeetingResponse(): MeetingResponse {
+private fun ResultRow.toMeetingResponse(myRsvp: String? = null): MeetingResponse {
     return MeetingResponse(this[MeetingTable.id].value, this[MeetingTable.title], this[MeetingTable.description],
         this[MeetingTable.dateTime], this[MeetingTable.endDateTime], this[MeetingTable.location],
-        this[MeetingTable.createdBy], this[MeetingTable.createdAt], this[MeetingTable.updatedAt])
+        this[MeetingTable.createdBy], this[MeetingTable.createdAt], this[MeetingTable.updatedAt], myRsvp)
 }
 
 private fun ResultRow.toAnnouncementResponse(groupId: Int): AnnouncementResponse {

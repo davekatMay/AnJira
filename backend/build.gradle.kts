@@ -22,7 +22,11 @@ dependencies {
     implementation("io.ktor:ktor-client-core:2.3.0")
     implementation("io.ktor:ktor-client-cio:2.3.0")
 
+    implementation("org.mindrot:jbcrypt:0.4")
+    implementation("org.flywaydb:flyway-core:9.22.3")
+
     testImplementation("io.ktor:ktor-server-test-host:2.3.0")
+    testImplementation(kotlin("test"))
     testImplementation("io.mockk:mockk:1.13.9")
     testImplementation("org.junit.jupiter:junit-jupiter:5.9.3")
 }

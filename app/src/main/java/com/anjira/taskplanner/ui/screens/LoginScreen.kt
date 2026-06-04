@@ -132,7 +132,7 @@ fun LoginScreen(
             Spacer(modifier = Modifier.height(12.dp))
 
             TextButton(
-                onClick = { isRegisterMode = !isRegisterMode; errorMessage = null }
+                onClick = { isRegisterMode = !isRegisterMode; errorMessage = null; confirmPassword = "" }
             ) {
                 Text(
                     if (isRegisterMode) "Уже есть аккаунт? Войти"

@@ -42,9 +42,7 @@ fun GroupListScreen(
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(errorMessage) {
-        errorMessage?.let {
-            scope.launch { snackbarHostState.showSnackbar(it) }
-        }
+        errorMessage?.let { snackbarHostState.showSnackbar(it) }
     }
 
     Scaffold(

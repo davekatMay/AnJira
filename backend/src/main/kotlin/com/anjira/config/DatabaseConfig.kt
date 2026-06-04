@@ -1,9 +1,8 @@
 package com.anjira.config
 
-import com.anjira.db.*
+import org.flywaydb.core.Flyway
 import org.jetbrains.exposed.sql.Database
-import org.jetbrains.exposed.sql.SchemaUtils
-import org.jetbrains.exposed.sql.transactions.transaction
+import org.postgresql.ds.PGSimpleDataSource
 import org.slf4j.LoggerFactory
 
 object DatabaseConfig {
@@ -16,18 +15,19 @@ object DatabaseConfig {
 
         logger.info("Connecting to database at $url")
 
-        Database.connect(url, driver = "org.postgresql.Driver", user = user, password = password)
-
-        val allTables = arrayOf(
-            UserTable, GroupTable, GroupMemberTable, TaskTable, SubtaskTable,
-            MeetingTable, MeetingParticipantTable, RefreshTokenTable,
-            AnnouncementTable, PlaylistTable, PlaylistTrackTable, NotificationTable
-        )
-
-        transaction {
-            SchemaUtils.drop(*allTables)
-            SchemaUtils.create(*allTables)
-            logger.info("Database schema initialized")
+        val dataSource = PGSimpleDataSource().apply {
+            setUrl(url)
+            setUser(user)
+            setPassword(password)
         }
+
+        Database.connect(dataSource)
+
+        Flyway.configure()
+            .dataSource(dataSource)
+            .load()
+            .migrate()
+
+        logger.info("Database schema initialized")
     }
 }

@@ -18,6 +18,10 @@ import org.slf4j.LoggerFactory
 
 fun main() {
     val logger = LoggerFactory.getLogger("Application")
+
+    val jwtSecret = System.getenv("JWT_SECRET")
+    require(!jwtSecret.isNullOrBlank()) { "JWT_SECRET environment variable is required" }
+
     logger.info("Starting server...")
 
     embeddedServer(Netty, port = 8080, host = "0.0.0.0") {
@@ -29,8 +33,7 @@ fun main() {
 
         install(Authentication) {
             jwt("jwt") {
-                val secret = System.getenv("JWT_SECRET") ?: "default-secret-key-change-in-production"
-                val algorithm = Algorithm.HMAC256(secret)
+                val algorithm = Algorithm.HMAC256(jwtSecret)
                 verifier(JWT.require(algorithm)
                     .withIssuer("taskplanner")
                     .withAudience("taskplanner_users")

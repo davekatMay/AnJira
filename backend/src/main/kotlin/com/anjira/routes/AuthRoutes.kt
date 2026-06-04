@@ -8,13 +8,12 @@ import io.ktor.server.application.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
+import org.jetbrains.exposed.dao.id.EntityID
+import org.jetbrains.exposed.dao.id.IdTable
+import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
-import org.jetbrains.exposed.sql.Op
-import org.jetbrains.exposed.sql.deleteWhere
-import org.jetbrains.exposed.sql.insert
-import org.jetbrains.exposed.sql.insertAndGetId
-import org.jetbrains.exposed.sql.select
 import org.jetbrains.exposed.sql.transactions.transaction
+import org.mindrot.jbcrypt.BCrypt
 import org.slf4j.LoggerFactory
 import java.time.LocalDateTime
 import java.util.UUID
@@ -26,9 +25,10 @@ data class LoginRequest(val email: String, val password: String)
 data class AuthResponse(val accessToken: String, val refreshToken: String, val userId: Int, val username: String)
 data class RefreshRequest(val refreshToken: String)
 
-fun hashPassword(password: String): String = java.security.MessageDigest.getInstance("SHA-256")
-    .digest(password.toByteArray())
-    .joinToString("") { "%02x".format(it) }
+private infix fun <T : Comparable<T>> Column<EntityID<T>>.eqId(value: T): Op<Boolean> =
+    eq(EntityID(value, table as IdTable<T>))
+
+fun hashPassword(password: String): String = BCrypt.hashpw(password, BCrypt.gensalt())
 
 fun Route.AuthRoute() {
     route("/auth") {
@@ -63,7 +63,7 @@ fun Route.AuthRoute() {
             saveRefreshToken(newUserId.value, refreshToken)
 
             logger.info("User registered successfully: ${newUserId.value}")
-            call.respond(AuthResponse(accessToken, refreshToken, newUserId.value, username))
+            call.respond(HttpStatusCode.Created, AuthResponse(accessToken, refreshToken, newUserId.value, username))
         }
 
         post("/login") {
@@ -74,7 +74,7 @@ fun Route.AuthRoute() {
                 UserTable.select { UserTable.email eq request.email }.firstOrNull()
             }
 
-            if (user == null || hashPassword(request.password) != user[UserTable.passwordHash]) {
+            if (user == null || !BCrypt.checkpw(request.password, user[UserTable.passwordHash])) {
                 logger.warn("Invalid credentials for email: ${request.email}")
                 call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Invalid email or password"))
                 return@post
@@ -120,7 +120,7 @@ fun Route.AuthRoute() {
             }
 
             val user = transaction {
-                UserTable.select { UserTable.id eq userId }.firstOrNull()
+                UserTable.select { UserTable.id eqId userId }.firstOrNull()
             } ?: run {
                 call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "User not found"))
                 return@post

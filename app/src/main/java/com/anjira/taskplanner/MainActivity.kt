@@ -148,15 +148,17 @@ class MainActivity : ComponentActivity() {
                                 }
 
                                 composable(Routes.GROUP_DETAIL) { backStackEntry ->
-                                    val groupId = backStackEntry.arguments?.getString("groupId")?.toIntOrNull() ?: return@composable
-                                    val groupViewModel = GroupViewModel(groupRepository, groupId)
+                            val groupId = backStackEntry.arguments?.getString("groupId")?.toIntOrNull() ?: return@composable
+                            val currentUserId by dataStoreManager.observeUserId().collectAsState(-1)
+                            val groupViewModel = remember(groupId, currentUserId) { GroupViewModel(groupRepository, groupId, currentUserId) }
 
-                                    GroupDetailScreen(
-                                        groupViewModel = groupViewModel,
-                                        groupId = groupId,
-                                        onBack = { navController.popBackStack() }
-                                    )
-                                }
+                            GroupDetailScreen(
+                                groupViewModel = groupViewModel,
+                                groupId = groupId,
+                                currentUserId = currentUserId,
+                                onBack = { navController.popBackStack() }
+                            )
+                        }
                             }
                         }
                     }
