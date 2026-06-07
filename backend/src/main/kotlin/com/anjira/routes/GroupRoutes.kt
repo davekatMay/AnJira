@@ -211,13 +211,15 @@ fun Route.GroupRoute() {
             val filter = call.request.queryParameters["filter"] ?: "all"
             val statusFilter = call.request.queryParameters["status"]
 
-            var query = TaskTable.select { TaskTable.groupId eq groupId }
-            when (filter) {
-                "mine" -> query = query.andWhere { TaskTable.assignedTo eq userId }
+            val tasks = transaction {
+                var query = TaskTable.select { TaskTable.groupId eq groupId }
+                when (filter) {
+                    "mine" -> query = query.andWhere { TaskTable.assignedTo eq userId }
+                }
+                statusFilter?.let { query = query.andWhere { TaskTable.status eq it } }
+                query.orderBy(TaskTable.createdAt, SortOrder.DESC).map { it.toTaskResponse() }
             }
-            statusFilter?.let { query = query.andWhere { TaskTable.status eq it } }
-
-            call.respond(query.orderBy(TaskTable.createdAt, SortOrder.DESC).map { it.toTaskResponse() })
+            call.respond(tasks)
         }
 
         post {
@@ -386,7 +388,7 @@ fun Route.GroupRoute() {
                     }
                 }
             }
-            call.respond(MeetingResponse(meetingId.value, groupId, meetingTitle, request.description, request.dateTime, request.endDateTime, request.location, userId, now, now))
+            call.respond(HttpStatusCode.Created, MeetingResponse(meetingId.value, groupId, meetingTitle, request.description, request.dateTime, request.endDateTime, request.location, userId, now, now))
         }
     }
 
@@ -758,6 +760,16 @@ fun Route.GroupRoute() {
         val notId = call.parameters["notificationId"]?.toIntOrNull() ?: run { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid notification ID")); return@put }
         transaction { NotificationTable.update({ (NotificationTable.id eqId notId) and (NotificationTable.userId eq userId) }) { upd -> upd[NotificationTable.isRead] = true } }
         call.respond(mapOf("message" to "Notification marked as read"))
+    }
+
+    // ─── USER STATS ────────────────────────────────────────────────────────
+    get("/users/me/stats") {
+        val userId = getAuthenticatedUserId(call) ?: return@get
+        val (completedTasks, attendedMeetings) = transaction {
+            TaskTable.select { (TaskTable.assignedTo eq userId) and (TaskTable.status eq "done") }.count().toInt() to
+            MeetingParticipantTable.select { (MeetingParticipantTable.userId eq userId) and (MeetingParticipantTable.status eq "going") }.count().toInt()
+        }
+        call.respond(mapOf("completedTasks" to completedTasks, "attendedMeetings" to attendedMeetings))
     }
 }
 

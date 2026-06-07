@@ -57,6 +57,9 @@ interface GroupRepository {
     suspend fun searchItunes(term: String): String
     suspend fun getItunesTrack(trackId: String): String
 
+    // User Stats
+    suspend fun getUserStats(): UserStats
+
     // Notifications
     suspend fun getNotifications(): List<AppNotification>
     suspend fun markNotificationRead(notificationId: Int)

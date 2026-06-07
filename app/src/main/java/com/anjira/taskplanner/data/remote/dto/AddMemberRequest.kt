@@ -44,3 +44,4 @@ data class PlaylistCreateRequest(val name: String, val type: String = "group", v
 data class PlaylistUpdateRequest(val name: String? = null)
 
 data class AddTrackRequest(val trackId: String, val trackName: String, val artistName: String, val trackViewUrl: String, val artworkUrl100: String? = null, val previewUrl: String? = null)
+data class UserStatsResponse(val completedTasks: Int, val attendedMeetings: Int)

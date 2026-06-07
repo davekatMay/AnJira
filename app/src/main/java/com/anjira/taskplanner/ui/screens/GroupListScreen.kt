@@ -14,6 +14,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
+import androidx.compose.material3.pulltorefresh.PullToRefreshContainer
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.text.style.TextAlign
 import com.anjira.taskplanner.domain.model.Group
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -22,6 +26,8 @@ fun GroupListScreen(
     groups: List<Group>,
     isLoading: Boolean,
     errorMessage: String?,
+    isRefreshing: Boolean,
+    onRefresh: () -> Unit,
     onGroupClick: (Int) -> Unit,
     onCreateGroup: (String, String?, String?) -> Unit,
     onJoinGroup: (String) -> Unit,
@@ -60,10 +66,25 @@ fun GroupListScreen(
             }
         }
     ) { padding ->
+        val pullRefreshState = rememberPullToRefreshState()
+
+        if (pullRefreshState.isRefreshing) {
+            LaunchedEffect(Unit) {
+                onRefresh()
+            }
+        }
+
+        LaunchedEffect(isRefreshing) {
+            if (!isRefreshing) {
+                pullRefreshState.endRefresh()
+            }
+        }
+
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .nestedScroll(pullRefreshState.nestedScrollConnection)
         ) {
             when {
                 isLoading -> {
@@ -73,11 +94,14 @@ fun GroupListScreen(
                 }
                 groups.isEmpty() -> {
                     Text(
-                        text = "Пока нет групп. Нажмите +, чтобы создать.",
+                        text = "Нет групп. Создайте или присоединитесь.",
                         style = MaterialTheme.typography.bodyLarge,
                         modifier = Modifier
                             .align(Alignment.Center)
                             .padding(16.dp)
+                            .fillMaxWidth(),
+                        textAlign = TextAlign.Center,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
                 else -> {
@@ -156,6 +180,11 @@ fun GroupListScreen(
                     }
                 }
             }
+
+            PullToRefreshContainer(
+                state = pullRefreshState,
+                modifier = Modifier.align(Alignment.TopCenter)
+            )
         }
     }
 

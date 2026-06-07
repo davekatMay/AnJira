@@ -6,6 +6,9 @@ import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.pulltorefresh.PullToRefreshContainer
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -109,20 +112,45 @@ fun GroupDetailScreen(
         if (uiState is GroupViewModel.UiState.Error) scope.launch { snackbarHostState.showSnackbar((uiState as GroupViewModel.UiState.Error).message) }
     }
 
+    var isRefreshing by remember { mutableStateOf(false) }
+    val pullToRefreshState = rememberPullToRefreshState()
+    if (pullToRefreshState.isRefreshing) {
+        LaunchedEffect(true) {
+            groupViewModel.loadGroupData()
+            pullToRefreshState.endRefresh()
+        }
+    }
+
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
-        topBar = { TopAppBar(title = { Text(group?.name ?: "Группа #$groupId") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Назад") } }) }
+        topBar = {
+            TopAppBar(
+                title = { Text(group?.name ?: "Группа #$groupId") },
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Назад") } },
+                actions = {
+                    IconButton(onClick = { isRefreshing = true; groupViewModel.loadGroupData(); isRefreshing = false }) { Icon(Icons.Default.Refresh, "Обновить") }
+                }
+            )
+        }
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding)) {
-            TabRow(selectedTabIndex = selectedTab) {
-                listOf("Задачи", "Встречи", "Объявления", "Плейлисты").forEachIndexed { i, label -> Tab(selected = selectedTab == i, onClick = { selectedTab = i }, text = { Text(label) }) }
+        Box(
+            modifier = Modifier.fillMaxSize().padding(padding).nestedScroll(pullToRefreshState.nestedScrollConnection)
+        ) {
+            Column(Modifier.fillMaxSize()) {
+                TabRow(selectedTabIndex = selectedTab) {
+                    listOf("Задачи", "Встречи", "Объявления", "Плейлисты").forEachIndexed { i, label -> Tab(selected = selectedTab == i, onClick = { selectedTab = i }, text = { Text(label) }) }
+                }
+                when (selectedTab) {
+                    0 -> TasksTab(groupViewModel, tasks, group?.members ?: emptyList())
+                    1 -> MeetingsTab(groupViewModel, meetings, group?.members ?: emptyList(), currentUserId)
+                    2 -> AnnouncementsTab(groupViewModel, announcements)
+                    3 -> PlaylistsTab(groupViewModel, playlists, tracksMap)
+                }
             }
-            when (selectedTab) {
-                0 -> TasksTab(groupViewModel, tasks, group?.members ?: emptyList())
-                1 -> MeetingsTab(groupViewModel, meetings, group?.members ?: emptyList(), currentUserId)
-                2 -> AnnouncementsTab(groupViewModel, announcements)
-                3 -> PlaylistsTab(groupViewModel, playlists, tracksMap)
-            }
+            PullToRefreshContainer(
+                state = pullToRefreshState,
+                modifier = Modifier.align(Alignment.TopCenter)
+            )
         }
     }
 }
