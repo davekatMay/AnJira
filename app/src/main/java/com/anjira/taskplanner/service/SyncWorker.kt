@@ -17,7 +17,7 @@ class SyncWorker(
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         try {
             val dataStoreManager = DataStoreManager(applicationContext)
-            RetrofitInstance.init(dataStoreManager)
+            RetrofitInstance.init { dataStoreManager.getAccessToken() }
             val db = AppDatabase.getInstance(applicationContext)
 
             val lastSync = dataStoreManager.getLastSyncTime()
@@ -30,7 +30,7 @@ class SyncWorker(
 
             dataStoreManager.setLastSyncTime(sync.serverTime)
             Result.success()
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             if (runAttemptCount < 3) Result.retry() else Result.failure()
         }
     }

@@ -1,6 +1,5 @@
 package com.anjira.taskplanner.data.remote
 
-import com.anjira.taskplanner.data.local.DataStoreManager
 import kotlinx.coroutines.runBlocking
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
@@ -11,15 +10,15 @@ import java.util.concurrent.TimeUnit
 
 object RetrofitInstance {
     private const val BASE_URL = "http://10.0.2.2:8080/"
-    private var dataStoreManager: DataStoreManager? = null
     private var cachedAccessToken: String? = null
+    private var tokenProvider: (suspend () -> String?)? = null
 
     lateinit var apiService: ApiService
         private set
 
     @Synchronized
-    fun init(dataStoreManager: DataStoreManager) {
-        this.dataStoreManager = dataStoreManager
+    fun init(getAccessToken: suspend () -> String?) {
+        tokenProvider = getAccessToken
         cachedAccessToken = null
         recreateApiService()
     }
@@ -35,7 +34,7 @@ object RetrofitInstance {
 
         val authInterceptor = Interceptor { chain ->
             var request = chain.request()
-            val token = cachedAccessToken ?: runBlocking { dataStoreManager?.getAccessToken() }
+            val token = cachedAccessToken ?: runBlocking { tokenProvider?.invoke() }
             if (token != null) {
                 request = request.newBuilder()
                     .header("Authorization", "Bearer $token")

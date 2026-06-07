@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.ui.Alignment
@@ -54,7 +53,7 @@ class MainActivity : ComponentActivity() {
         }
 
         val dataStoreManager = DataStoreManager(applicationContext)
-        RetrofitInstance.init(dataStoreManager)
+        RetrofitInstance.init { dataStoreManager.getAccessToken() }
         val apiService = RetrofitInstance.apiService
         val db = com.anjira.taskplanner.data.local.room.AppDatabase.getInstance(applicationContext)
         val authRepository = AuthRepositoryImpl(apiService, dataStoreManager)
