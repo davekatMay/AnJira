@@ -8,6 +8,9 @@ object UserTable : IntIdTable("users") {
     val username: Column<String> = varchar("username", 50).uniqueIndex()
     val passwordHash: Column<String> = varchar("password_hash", 255)
     val email: Column<String> = varchar("email", 100).uniqueIndex()
+    val avatar: Column<String?> = varchar("avatar", 500).nullable().default(null)
+    val description: Column<String?> = varchar("description", 1000).nullable().default(null)
+    val contacts: Column<String?> = text("contacts").nullable().default(null)
     val createdAt: Column<String> = varchar("created_at", 50)
     val updatedAt: Column<String> = varchar("updated_at", 50)
 }

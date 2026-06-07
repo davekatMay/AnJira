@@ -24,7 +24,7 @@ class AuthViewModel(
                 val user = authRepository.register(email, password)
                 _uiState.value = UiState.Success(user)
             } catch (e: Exception) {
-                _uiState.value = UiState.Error(e.message ?: "Registration failed")
+                _uiState.value = UiState.Error(e.message ?: "Ошибка регистрации")
             }
         }
     }
@@ -36,7 +36,7 @@ class AuthViewModel(
                 val user = authRepository.login(email, password)
                 _uiState.value = UiState.Success(user)
             } catch (e: Exception) {
-                _uiState.value = UiState.Error(e.message ?: "Login failed")
+                _uiState.value = UiState.Error(e.message ?: "Ошибка входа")
             }
         }
     }

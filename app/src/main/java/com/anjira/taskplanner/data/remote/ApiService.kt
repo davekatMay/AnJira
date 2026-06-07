@@ -163,6 +163,13 @@ interface ApiService {
     @PUT("notifications/preferences/{groupId}")
     fun updateNotificationPreferences(@Path("groupId") groupId: Int, @Body request: NotificationPreferencesRequest): Call<Map<String, String>>
 
+    // User profile
+    @GET("users/me")
+    fun getUserProfile(): Call<UserProfileResponse>
+
+    @PUT("users/me")
+    fun updateUserProfile(@Body body: Map<String, String?>): Call<Map<String, Any?>>
+
     // User Stats
     @GET("users/me/stats")
     fun getUserStats(): Call<UserStatsResponse>

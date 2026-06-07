@@ -227,7 +227,7 @@ private fun DualPaneLayout(
                             val group = groupRepository.createGroup(name, desc, avatar)
                             groups = groups + group
                         } catch (e: Exception) {
-                            snackbarHostState.showSnackbar(e.message ?: "Failed to create group")
+                            snackbarHostState.showSnackbar(e.message ?: "Не удалось создать группу")
                         }
                     }
                 },
@@ -238,7 +238,7 @@ private fun DualPaneLayout(
                             groups = groups + group
                             snackbarHostState.showSnackbar("Присоединились к группе ${group.name}")
                         } catch (e: Exception) {
-                            snackbarHostState.showSnackbar(e.message ?: "Failed to join group")
+                            snackbarHostState.showSnackbar(e.message ?: "Не удалось присоединиться к группе")
                         }
                     }
                 },
@@ -331,7 +331,7 @@ private fun NavGraphBuilder.addNavRoutes(
                         val group = groupRepository.createGroup(name, desc, avatar)
                         groups = groups + group
                     } catch (e: Exception) {
-                        snackbarHostState.showSnackbar(e.message ?: "Failed to create group")
+                        snackbarHostState.showSnackbar(e.message ?: "Не удалось создать группу")
                     }
                 }
             },
@@ -342,7 +342,7 @@ private fun NavGraphBuilder.addNavRoutes(
                         groups = groups + group
                         snackbarHostState.showSnackbar("Присоединились к группе ${group.name}")
                     } catch (e: Exception) {
-                        snackbarHostState.showSnackbar(e.message ?: "Failed to join group")
+                        snackbarHostState.showSnackbar(e.message ?: "Не удалось присоединиться к группе")
                     }
                 }
             },

@@ -1,5 +1,6 @@
 package com.anjira.taskplanner.data.repository
 
+import org.json.JSONObject
 import com.anjira.taskplanner.data.local.DataStoreManager
 import com.anjira.taskplanner.data.remote.ApiService
 import com.anjira.taskplanner.data.remote.RetrofitInstance
@@ -21,9 +22,11 @@ class AuthRepositoryImpl(
             val request = RegisterRequest(email, password)
             val response = apiService.register(request).execute()
             if (!response.isSuccessful) {
-                throw Exception("Registration failed: ${response.errorBody()?.string()}")
+                val errBody = response.errorBody()?.string()
+                val msg = try { JSONObject(errBody ?: "{}").optString("error", "Ошибка регистрации") } catch (_: Exception) { "Ошибка регистрации" }
+                throw Exception(msg)
             }
-            val authResponse = response.body() ?: throw Exception("Empty response body")
+            val authResponse = response.body() ?: throw Exception("Пустой ответ сервера")
             dataStoreManager.saveTokens(authResponse.accessToken, authResponse.refreshToken)
             RetrofitInstance.updateToken(authResponse.accessToken)
             dataStoreManager.saveUserInfo(authResponse.userId, authResponse.username, authResponse.email)
@@ -36,9 +39,11 @@ class AuthRepositoryImpl(
             val request = LoginRequest(email, password)
             val response = apiService.login(request).execute()
             if (!response.isSuccessful) {
-                throw Exception("Login failed: ${response.errorBody()?.string()}")
+                val errBody = response.errorBody()?.string()
+                val msg = try { JSONObject(errBody ?: "{}").optString("error", "Неверный email или пароль") } catch (_: Exception) { "Неверный email или пароль" }
+                throw Exception(msg)
             }
-            val authResponse = response.body() ?: throw Exception("Empty response body")
+            val authResponse = response.body() ?: throw Exception("Пустой ответ сервера")
             dataStoreManager.saveTokens(authResponse.accessToken, authResponse.refreshToken)
             RetrofitInstance.updateToken(authResponse.accessToken)
             dataStoreManager.saveUserInfo(authResponse.userId, authResponse.username, authResponse.email)

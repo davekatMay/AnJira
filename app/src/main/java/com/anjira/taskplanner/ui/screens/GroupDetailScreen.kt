@@ -34,6 +34,17 @@ import com.anjira.taskplanner.domain.model.*
 import com.anjira.taskplanner.ui.viewmodel.GroupViewModel
 import kotlinx.coroutines.launch
 import org.json.JSONArray
+import org.json.JSONObject
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.net.Uri
+import java.io.File
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import coil.compose.AsyncImage
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import java.text.SimpleDateFormat
 import java.time.LocalDate
 import java.time.YearMonth
@@ -107,6 +118,7 @@ fun GroupDetailScreen(
     var selectedTab by remember { mutableIntStateOf(0) }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+    var showInfoDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(uiState) {
         if (uiState is GroupViewModel.UiState.Error) scope.launch { snackbarHostState.showSnackbar((uiState as GroupViewModel.UiState.Error).message) }
@@ -129,6 +141,7 @@ fun GroupDetailScreen(
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Назад") } },
                 actions = {
                     IconButton(onClick = { isRefreshing = true; groupViewModel.loadGroupData(); isRefreshing = false }) { Icon(Icons.Default.Refresh, "Обновить") }
+                    IconButton(onClick = { showInfoDialog = true }) { Icon(Icons.Default.Info, "О группе") }
                 }
             )
         }
@@ -153,6 +166,14 @@ fun GroupDetailScreen(
             )
         }
     }
+    if (showInfoDialog && group != null) {
+        GroupInfoDialog(
+            vm = groupViewModel,
+            group = group!!,
+            isAdmin = group!!.members.any { it.userId == currentUserId && it.role == "admin" },
+            onDismiss = { showInfoDialog = false }
+        )
+    }
 }
 
 // ─── TASKS TAB ────────────────────────────────────────────────────────────
@@ -162,6 +183,14 @@ private fun TasksTab(vm: GroupViewModel, tasks: List<Task>, members: List<GroupM
     var showCreate by remember { mutableStateOf(false) }
     var editTask by remember { mutableStateOf<Task?>(null) }
 
+    val filteredTasks = remember(tasks, filter) {
+        when (filter) {
+            "all" -> tasks.filter { it.status != "done" }
+            "mine" -> tasks.filter { it.status != "done" }
+            else -> tasks
+        }
+    }
+
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
             Row(Modifier.padding(8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -170,8 +199,8 @@ private fun TasksTab(vm: GroupViewModel, tasks: List<Task>, members: List<GroupM
                 }
             }
             LazyColumn(Modifier.weight(1f).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                if (tasks.isEmpty()) item { Text("Нет задач", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                items(tasks, key = { it.id }) { task ->
+                if (filteredTasks.isEmpty()) item { Text("Нет задач", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                items(filteredTasks, key = { it.id }) { task ->
                     Card(onClick = { editTask = task }, modifier = Modifier.fillMaxWidth()) {
                         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                             Checkbox(checked = task.status == "done", onCheckedChange = { vm.toggleTaskStatus(task.id, task.status) })
@@ -179,7 +208,7 @@ private fun TasksTab(vm: GroupViewModel, tasks: List<Task>, members: List<GroupM
                             Column(Modifier.weight(1f)) {
                                 Text(task.title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 task.deadline?.let { Text("Дедлайн: $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
-                                Text("Статус: ${task.status}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("Статус: ${statusDisplayName(task.status)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             IconButton(onClick = { vm.deleteTask(task.id) }) { Icon(Icons.Default.Delete, "Удалить", tint = MaterialTheme.colorScheme.error) }
                         }
@@ -238,7 +267,7 @@ private fun EditTaskDialog(vm: GroupViewModel, task: Task, members: List<GroupMe
             Spacer(Modifier.height(8.dp))
             ExposedDropdownMenuBox(expanded = expandedStatus, onExpandedChange = { expandedStatus = it }) {
                 OutlinedTextField(value = status, onValueChange = {}, readOnly = true, label = { Text("Статус") }, trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expandedStatus) }, modifier = Modifier.menuAnchor().fillMaxWidth())
-                DropdownMenu(expanded = expandedStatus, onDismissRequest = { expandedStatus = false }) { listOf("to_do", "in_progress", "done").forEach { s -> DropdownMenuItem(text = { Text(s) }, onClick = { status = s; expandedStatus = false }) } }
+                DropdownMenu(expanded = expandedStatus, onDismissRequest = { expandedStatus = false }) { listOf("to_do", "in_progress", "done").forEach { s -> DropdownMenuItem(text = { Text(statusDisplayName(s)) }, onClick = { status = s; expandedStatus = false }) } }
             }
             Spacer(Modifier.height(8.dp))
             ExposedDropdownMenuBox(expanded = expandedAssignee, onExpandedChange = { expandedAssignee = it }) {
@@ -433,16 +462,27 @@ private fun AnnouncementsTab(vm: GroupViewModel, announcements: List<Announcemen
 
 @Composable
 private fun CreateAnnouncementDialog(vm: GroupViewModel, onDismiss: () -> Unit) {
-    var text by remember { mutableStateOf("") }; var attachmentUrl by remember { mutableStateOf("") }; var attachmentUrls by remember { mutableStateOf(listOf<String>()) }
+    var text by remember { mutableStateOf("") }; var attachmentUrls by remember { mutableStateOf(listOf<String>()) }
+    val context = LocalContext.current
+
+    val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        uri?.let {
+            val path = copyImageToInternalStorage(context, it)
+            if (path != null) attachmentUrls = attachmentUrls + path
+        }
+    }
+
     AlertDialog(onDismissRequest = onDismiss, title = { Text("Новое объявление") }, text = {
         Column {
             OutlinedTextField(value = text, onValueChange = { text = it }, label = { Text("Текст") }, modifier = Modifier.fillMaxWidth(), minLines = 3)
             Spacer(Modifier.height(8.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                OutlinedTextField(value = attachmentUrl, onValueChange = { attachmentUrl = it }, label = { Text("URL вложения") }, singleLine = true, modifier = Modifier.weight(1f))
-                IconButton(onClick = { if (attachmentUrl.isNotBlank()) { attachmentUrls = attachmentUrls + attachmentUrl; attachmentUrl = "" } }) { Icon(Icons.Default.Add, "Добавить") }
+            Button(onClick = { filePicker.launch("*/*") }, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Default.AttachFile, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Прикрепить фото или файл")
             }
-            attachmentUrls.forEach { url -> Text("📎 $url", style = MaterialTheme.typography.bodySmall) }
+            Spacer(Modifier.height(4.dp))
+            attachmentUrls.forEach { url -> Text("📎 $url", style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis) }
         }
     }, confirmButton = { TextButton(onClick = { vm.createAnnouncement(text, JSONArray(attachmentUrls.toTypedArray()).toString()); onDismiss() }, enabled = text.isNotBlank()) { Text("Опубликовать") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } })
 }
@@ -450,18 +490,27 @@ private fun CreateAnnouncementDialog(vm: GroupViewModel, onDismiss: () -> Unit) 
 @Composable
 private fun EditAnnouncementDialog(vm: GroupViewModel, announcement: Announcement, onDismiss: () -> Unit) {
     var text by remember { mutableStateOf(announcement.text) }
-    var attachmentUrl by remember { mutableStateOf("") }
     var attachmentUrls by remember { mutableStateOf<List<String>>(try { JSONArray(announcement.attachments).let { arr -> (0 until arr.length()).map { arr.getString(it) } } } catch (_: Exception) { emptyList() }) }
+    val context = LocalContext.current
+
+    val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        uri?.let {
+            val path = copyImageToInternalStorage(context, it)
+            if (path != null) attachmentUrls = attachmentUrls + path
+        }
+    }
 
     AlertDialog(onDismissRequest = onDismiss, title = { Text("Редактировать объявление") }, text = {
         Column {
             OutlinedTextField(value = text, onValueChange = { text = it }, label = { Text("Текст") }, modifier = Modifier.fillMaxWidth(), minLines = 3)
             Spacer(Modifier.height(8.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                OutlinedTextField(value = attachmentUrl, onValueChange = { attachmentUrl = it }, label = { Text("URL вложения") }, singleLine = true, modifier = Modifier.weight(1f))
-                IconButton(onClick = { if (attachmentUrl.isNotBlank()) { attachmentUrls = attachmentUrls + attachmentUrl; attachmentUrl = "" } }) { Icon(Icons.Default.Add, "Добавить") }
+            Button(onClick = { filePicker.launch("*/*") }, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Default.AttachFile, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Прикрепить фото или файл")
             }
-            attachmentUrls.forEach { url -> Text("📎 $url", style = MaterialTheme.typography.bodySmall) }
+            Spacer(Modifier.height(4.dp))
+            attachmentUrls.forEach { url -> Text("📎 $url", style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis) }
         }
     }, confirmButton = { TextButton(onClick = { vm.updateAnnouncement(announcement.id, text, JSONArray(attachmentUrls.toTypedArray()).toString()); onDismiss() }, enabled = text.isNotBlank()) { Text("Сохранить") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } })
 }
@@ -547,7 +596,14 @@ private fun RenamePlaylistDialog(vm: GroupViewModel, playlist: Playlist, onDismi
 private fun AddTrackDialog(vm: GroupViewModel, playlistId: Int, itunesJson: String, onDismiss: () -> Unit) {
     var localQuery by remember { mutableStateOf("") }
     val parsedResults = remember(itunesJson) {
-        try { val arr = JSONArray(itunesJson); (0 until arr.length()).map { i -> val item = arr.getJSONObject(i); TrackResult(item.optString("trackName", ""), item.optString("artistName", ""), item.optString("trackId", ""), item.optString("trackViewUrl", ""), item.optString("artworkUrl100", ""), item.optString("previewUrl", "").ifEmpty { null }) } } catch (_: Exception) { emptyList() }
+        try {
+            val obj = JSONObject(itunesJson)
+            val arr = obj.optJSONArray("results") ?: JSONArray(itunesJson)
+            (0 until arr.length()).map { i ->
+                val item = arr.getJSONObject(i)
+                TrackResult(item.optString("trackName", ""), item.optString("artistName", ""), item.optString("trackId", ""), item.optString("trackViewUrl", ""), item.optString("artworkUrl100", ""), item.optString("previewUrl", "").ifEmpty { null })
+            }
+        } catch (_: Exception) { emptyList() }
     }
     AlertDialog(onDismissRequest = onDismiss, title = { Text("Поиск в iTunes") }, text = {
         Column {
@@ -577,4 +633,101 @@ private data class TrackResult(val name: String, val artist: String, val trackId
 private fun CreatePlaylistDialog(vm: GroupViewModel, onDismiss: () -> Unit) {
     var name by remember { mutableStateOf("") }
     AlertDialog(onDismissRequest = onDismiss, title = { Text("Новый плейлист") }, text = { OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Название") }, singleLine = true, modifier = Modifier.fillMaxWidth()) }, confirmButton = { TextButton(onClick = { vm.createPlaylist(name, "group", null); onDismiss() }, enabled = name.isNotBlank()) { Text("Создать") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } })
+}
+
+@Composable
+private fun GroupInfoDialog(vm: GroupViewModel, group: Group, isAdmin: Boolean, onDismiss: () -> Unit) {
+    var description by remember { mutableStateOf(group.description ?: "") }
+    var avatar by remember { mutableStateOf(group.avatar ?: "") }
+    var avatarUri by remember { mutableStateOf<Uri?>(null) }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    val avatarPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        uri?.let {
+            avatarUri = it
+            avatar = copyImageToInternalStorage(context, it) ?: it.toString()
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(group.name) },
+        text = {
+            Column {
+                if (avatar.isNotBlank()) {
+                    AsyncImage(
+                        model = avatar,
+                        contentDescription = "Аватар",
+                        modifier = Modifier.size(80.dp).clip(CircleShape).align(Alignment.CenterHorizontally),
+                        contentScale = ContentScale.Crop
+                    )
+                    Spacer(Modifier.height(8.dp))
+                }
+                if (isAdmin) {
+                    Button(onClick = { avatarPicker.launch("image/*") }, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Default.Image, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text(if (avatarUri != null) "Фото выбрано" else "Сменить аватар")
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(value = description, onValueChange = { description = it }, label = { Text("Описание") }, modifier = Modifier.fillMaxWidth())
+                    Spacer(Modifier.height(8.dp))
+                } else {
+                    group.description?.let {
+                        Text("Описание: $it", style = MaterialTheme.typography.bodyMedium)
+                        Spacer(Modifier.height(8.dp))
+                    }
+                }
+                Text("Код приглашения:", style = MaterialTheme.typography.labelLarge)
+                Spacer(Modifier.height(4.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(group.inviteCode, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.width(8.dp))
+                    IconButton(onClick = {
+                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        clipboard.setPrimaryClip(ClipData.newPlainText("invite", group.inviteCode))
+                        scope.launch { snackbarHostState.showSnackbar("Код скопирован") }
+                    }) { Icon(Icons.Default.ContentCopy, "Копировать") }
+                }
+                if (isAdmin) {
+                    Spacer(Modifier.height(8.dp))
+                    Text("${group.members.size} участников", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        },
+        confirmButton = {
+            if (isAdmin) {
+                TextButton(onClick = {
+                    vm.updateGroup(group.id, group.name, description.ifBlank { null }, avatar.ifBlank { null })
+                    onDismiss()
+                }) { Text("Сохранить") }
+            } else {
+                TextButton(onClick = onDismiss) { Text("Закрыть") }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Отмена") }
+        }
+    )
+}
+
+private fun statusDisplayName(status: String): String = when (status) {
+    "to_do" -> "К выполнению"
+    "in_progress" -> "В работе"
+    "done" -> "Готово"
+    else -> status
+}
+
+private fun copyImageToInternalStorage(context: Context, uri: Uri): String? {
+    return try {
+        val inputStream = context.contentResolver.openInputStream(uri) ?: return null
+        val file = File(context.filesDir, "avatars")
+        if (!file.exists()) file.mkdirs()
+        val avatarFile = File(file, "avatar_${System.currentTimeMillis()}.jpg")
+        avatarFile.outputStream().use { output -> inputStream.copyTo(output) }
+        inputStream.close()
+        avatarFile.absolutePath
+    } catch (e: Exception) { null }
 }

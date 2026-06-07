@@ -34,7 +34,7 @@ fun Route.AuthRoute() {
                 UserTable.select { UserTable.email eq request.email }.firstOrNull()
             }
             if (existingUser != null) {
-                call.respond(HttpStatusCode.Conflict, mapOf("error" to "User with this email already exists"))
+                call.respond(HttpStatusCode.Conflict, mapOf("error" to "Пользователь с таким email уже существует"))
                 return@post
             }
 
@@ -70,7 +70,7 @@ fun Route.AuthRoute() {
 
             if (user == null || !BCrypt.checkpw(request.password, user[UserTable.passwordHash])) {
                 logger.warn("Invalid credentials for email: ${request.email}")
-                call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Invalid email or password"))
+                call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Неверный email или пароль"))
                 return@post
             }
 
@@ -92,13 +92,13 @@ fun Route.AuthRoute() {
 
             val decoded = jwtUtil.verifyToken(request.refreshToken)
             if (decoded == null || decoded.getClaim("type").asString() != "refresh") {
-                call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Invalid refresh token"))
+                call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Недействительный токен"))
                 return@post
             }
 
             val userId = decoded.subject.toIntOrNull()
             if (userId == null) {
-                call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Invalid refresh token"))
+                call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Недействительный токен"))
                 return@post
             }
 
@@ -109,14 +109,14 @@ fun Route.AuthRoute() {
             }
 
             if (stored == null) {
-                call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Refresh token revoked"))
+                call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Токен обновления отозван"))
                 return@post
             }
 
             val user = transaction {
                 UserTable.select { UserTable.id eqId userId }.firstOrNull()
             } ?: run {
-                call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "User not found"))
+                call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Пользователь не найден"))
                 return@post
             }
 

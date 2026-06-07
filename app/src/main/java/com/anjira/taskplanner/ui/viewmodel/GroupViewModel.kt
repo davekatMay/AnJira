@@ -57,7 +57,7 @@ class GroupViewModel(
                 _notifications.value = groupRepository.getNotifications()
                 _uiState.value = UiState.Success
             } catch (e: Exception) {
-                _uiState.value = UiState.Error(e.message ?: "Failed to load")
+                _uiState.value = UiState.Error(e.message ?: "Не удалось загрузить данные")
             }
         }
     }
@@ -67,6 +67,15 @@ class GroupViewModel(
             try {
                 val t = groupRepository.getTracks(playlistId)
                 _tracks.value = _tracks.value + (playlistId to t)
+            } catch (_: Exception) {}
+        }
+    }
+
+    fun updateGroup(groupId: Int, name: String?, description: String?, avatar: String?) {
+        viewModelScope.launch {
+            try {
+                groupRepository.updateGroup(groupId, name, description, avatar)
+                loadGroupData()
             } catch (_: Exception) {}
         }
     }
@@ -85,7 +94,7 @@ class GroupViewModel(
                 val t = groupRepository.createTask(groupId, title, description, deadline, assignedTo)
                 _tasks.value = _tasks.value + t
                 _uiState.value = UiState.Success
-            } catch (e: Exception) { _uiState.value = UiState.Error(e.message ?: "Failed") }
+            } catch (e: Exception) { _uiState.value = UiState.Error(e.message ?: "Ошибка") }
         }
     }
 
@@ -121,7 +130,7 @@ class GroupViewModel(
                 val m = groupRepository.createMeeting(groupId, title, description, dateTime, endDateTime, location, invitedUserIds)
                 _meetings.value = _meetings.value + m
                 _uiState.value = UiState.Success
-            } catch (e: Exception) { _uiState.value = UiState.Error(e.message ?: "Failed") }
+            } catch (e: Exception) { _uiState.value = UiState.Error(e.message ?: "Ошибка") }
         }
     }
 
@@ -152,7 +161,7 @@ class GroupViewModel(
                 val a = groupRepository.createAnnouncement(groupId, text, attachments)
                 _announcements.value = listOf(a) + _announcements.value
                 _uiState.value = UiState.Success
-            } catch (e: Exception) { _uiState.value = UiState.Error(e.message ?: "Failed") }
+            } catch (e: Exception) { _uiState.value = UiState.Error(e.message ?: "Ошибка") }
         }
     }
 
@@ -182,7 +191,7 @@ class GroupViewModel(
                 val p = groupRepository.createPlaylist(groupId, name, type, meetingId)
                 _playlists.value = _playlists.value + p
                 _uiState.value = UiState.Success
-            } catch (e: Exception) { _uiState.value = UiState.Error(e.message ?: "Failed") }
+            } catch (e: Exception) { _uiState.value = UiState.Error(e.message ?: "Ошибка") }
         }
     }
 
