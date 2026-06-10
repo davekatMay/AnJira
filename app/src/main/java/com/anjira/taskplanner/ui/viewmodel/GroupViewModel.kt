@@ -229,15 +229,22 @@ class GroupViewModel(
     }
 
     // ─── iTunes ───────────────────────────────────────────────────────────
+    private val _itunesLoading = MutableStateFlow(false)
+    val itunesLoading: StateFlow<Boolean> = _itunesLoading.asStateFlow()
+
     fun searchItunes(term: String) {
         viewModelScope.launch {
+            _itunesLoading.value = true
             try { _itunesResults.value = groupRepository.searchItunes(term) } catch (_: Exception) { _itunesResults.value = "[]" }
+            _itunesLoading.value = false
         }
     }
 
     fun getTrackInfo(trackId: String) {
         viewModelScope.launch {
+            _itunesLoading.value = true
             try { _itunesResults.value = groupRepository.getItunesTrack(trackId) } catch (_: Exception) { _itunesResults.value = "{}" }
+            _itunesLoading.value = false
         }
     }
 

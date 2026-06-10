@@ -11,6 +11,7 @@ import io.ktor.server.auth.UserIdPrincipal
 import io.ktor.server.auth.principal
 import io.ktor.client.*
 import io.ktor.client.engine.cio.*
+import io.ktor.client.plugins.*
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import com.anjira.util.eqId
@@ -24,7 +25,15 @@ import java.time.LocalDateTime
 import java.util.UUID
 
 private val logger = LoggerFactory.getLogger("GroupRoutes")
-private val httpClient = HttpClient(CIO)
+private val httpClient = HttpClient(CIO) {
+    install(HttpTimeout) {
+        requestTimeoutMillis = 30000
+        connectTimeoutMillis = 15000
+    }
+    defaultRequest {
+        header("User-Agent", "AnJira/1.0")
+    }
+}
 
 // ─── Group DTOs ───────────────────────────────────────────────────────────
 data class GroupCreateRequest(val name: String, val description: String? = null, val avatar: String? = null)

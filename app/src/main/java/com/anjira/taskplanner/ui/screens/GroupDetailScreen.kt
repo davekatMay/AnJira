@@ -526,6 +526,7 @@ private fun PlaylistsTab(vm: GroupViewModel, playlists: List<Playlist>, tracksMa
     var showAddTrack by remember { mutableStateOf<Int?>(null) }
     var renamePlaylist by remember { mutableStateOf<Playlist?>(null) }
     val itunesJson by vm.itunesResults.collectAsState()
+    val itunesLoading by vm.itunesLoading.collectAsState()
 
     Box(Modifier.fillMaxSize()) {
         LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -585,7 +586,7 @@ private fun PlaylistsTab(vm: GroupViewModel, playlists: List<Playlist>, tracksMa
         FloatingActionButton(onClick = { showCreate = true }, modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)) { Icon(Icons.Default.Add, "Создать плейлист") }
     }
     if (showCreate) CreatePlaylistDialog(vm) { showCreate = false }
-    showAddTrack?.let { plId -> AddTrackDialog(vm, plId, itunesJson, onDismiss = { showAddTrack = null }) }
+    showAddTrack?.let { plId -> AddTrackDialog(vm, plId, itunesJson, itunesLoading, onDismiss = { showAddTrack = null }) }
     renamePlaylist?.let { RenamePlaylistDialog(vm, it) { renamePlaylist = null } }
 }
 
@@ -596,7 +597,7 @@ private fun RenamePlaylistDialog(vm: GroupViewModel, playlist: Playlist, onDismi
 }
 
 @Composable
-private fun AddTrackDialog(vm: GroupViewModel, playlistId: Int, itunesJson: String, onDismiss: () -> Unit) {
+private fun AddTrackDialog(vm: GroupViewModel, playlistId: Int, itunesJson: String, isLoading: Boolean, onDismiss: () -> Unit) {
     var localQuery by remember { mutableStateOf("") }
     val parsedResults = remember(itunesJson) {
         try {
@@ -610,12 +611,19 @@ private fun AddTrackDialog(vm: GroupViewModel, playlistId: Int, itunesJson: Stri
     }
     AlertDialog(onDismissRequest = onDismiss, title = { Text("Поиск в iTunes") }, text = {
         Column {
-            OutlinedTextField(value = localQuery, onValueChange = { localQuery = it }, label = { Text("Название трека") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            Spacer(Modifier.height(8.dp)); Button(onClick = { vm.searchItunes(localQuery) }, modifier = Modifier.fillMaxWidth()) { Text("Поиск") }
+            OutlinedTextField(value = localQuery, onValueChange = { localQuery = it }, label = { Text("Название трека или имя артиста") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             Spacer(Modifier.height(8.dp))
-            if (itunesJson == "[]" || itunesJson == "{}") { Text("Введите запрос и нажмите Поиск", style = MaterialTheme.typography.bodySmall) }
-            else if (parsedResults.isEmpty()) { Text("Нет результатов", style = MaterialTheme.typography.bodySmall) }
-            else {
+            Button(onClick = { vm.searchItunes(localQuery) }, modifier = Modifier.fillMaxWidth(), enabled = !isLoading) { Text("Поиск") }
+            Spacer(Modifier.height(8.dp))
+            if (isLoading) {
+                Box(Modifier.fillMaxWidth().height(100.dp), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
+            } else if (itunesJson == "[]" || itunesJson == "{}") {
+                Text("Введите запрос и нажмите Поиск", style = MaterialTheme.typography.bodySmall)
+            } else if (parsedResults.isEmpty()) {
+                Text("Нет результатов", style = MaterialTheme.typography.bodySmall)
+            } else {
                 LazyColumn(Modifier.height(300.dp)) {
                     items(parsedResults) { result ->
                         Card(onClick = { vm.addTrack(playlistId, result.trackId, result.name, result.artist, result.url, result.art, result.prev); onDismiss() }, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {

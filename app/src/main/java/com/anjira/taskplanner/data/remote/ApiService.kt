@@ -137,10 +137,10 @@ interface ApiService {
 
     // iTunes Search
     @GET("itunes/search")
-    fun searchItunes(@Query("term") term: String, @Query("limit") limit: Int = 20): Call<String>
+    fun searchItunes(@Query("term") term: String, @Query("limit") limit: Int = 20): Call<okhttp3.ResponseBody>
 
     @GET("itunes/track/{trackId}")
-    fun getItunesTrack(@Path("trackId") trackId: String): Call<String>
+    fun getItunesTrack(@Path("trackId") trackId: String): Call<okhttp3.ResponseBody>
 
     // Notifications
     @GET("notifications")

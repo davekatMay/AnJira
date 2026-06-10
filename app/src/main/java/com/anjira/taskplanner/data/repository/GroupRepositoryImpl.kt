@@ -148,10 +148,10 @@ class GroupRepositoryImpl(
         withContext(Dispatchers.IO) { apiService.reorderTracks(playlistId, ReorderTracksRequest(trackIds)).execute().let { r -> if (!r.isSuccessful) throw Exception(parseError(r.errorBody()?.string())) } }
 
     override suspend fun searchItunes(term: String): String =
-        withContext(Dispatchers.IO) { apiService.searchItunes(term).execute().let { r -> if (!r.isSuccessful) throw Exception(parseError(r.errorBody()?.string())); r.body() ?: "[]" } }
+        withContext(Dispatchers.IO) { apiService.searchItunes(term).execute().let { r -> if (!r.isSuccessful) throw Exception(parseError(r.errorBody()?.string())); r.body()?.string() ?: "[]" } }
 
     override suspend fun getItunesTrack(trackId: String): String =
-        withContext(Dispatchers.IO) { apiService.getItunesTrack(trackId).execute().let { r -> if (!r.isSuccessful) throw Exception(parseError(r.errorBody()?.string())); r.body() ?: "{}" } }
+        withContext(Dispatchers.IO) { apiService.getItunesTrack(trackId).execute().let { r -> if (!r.isSuccessful) throw Exception(parseError(r.errorBody()?.string())); r.body()?.string() ?: "{}" } }
 
     override suspend fun getUserStats(): UserStats =
         withContext(Dispatchers.IO) { apiService.getUserStats().execute().let { r -> if (!r.isSuccessful) throw Exception(parseError(r.errorBody()?.string())); checkBody(r).toUserStats() } }
