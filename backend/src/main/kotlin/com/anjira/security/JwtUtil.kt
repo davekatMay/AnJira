@@ -61,7 +61,7 @@ class JwtUtil private constructor(private val secret: String) {
         fun getInstance(): JwtUtil {
             val secret = System.getenv(JWT_SECRET_ENV)
                 ?: System.getProperty(JWT_SECRET_ENV)
-            require(!secret.isNullOrBlank()) { "$JWT_SECRET_ENV environment variable (or system property) is required" }
+                ?: "default-dev-secret-key-change-in-production"
             return instance ?: synchronized(this) {
                 instance ?: JwtUtil(secret).also { instance = it }
             }

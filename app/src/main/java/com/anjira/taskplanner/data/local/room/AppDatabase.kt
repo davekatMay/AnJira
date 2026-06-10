@@ -76,6 +76,9 @@ interface GroupDao {
     @Query("SELECT * FROM cached_groups")
     suspend fun getAllGroups(): List<CachedGroup>
 
+    @Query("SELECT * FROM cached_groups WHERE id = :id")
+    suspend fun getGroupById(id: Int): CachedGroup?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertGroups(groups: List<CachedGroup>)
 

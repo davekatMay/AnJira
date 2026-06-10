@@ -7,6 +7,6 @@ data class UserProfileResponse(
     val avatar: String?,
     val description: String?,
     val contacts: String?,
-    val createdAt: String,
-    val updatedAt: String
+    val createdAt: String? = null,
+    val updatedAt: String? = null
 )

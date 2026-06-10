@@ -2,6 +2,8 @@ package com.anjira.taskplanner.data.repository
 
 import org.json.JSONObject
 import com.anjira.taskplanner.data.local.room.AppDatabase
+import com.anjira.taskplanner.data.local.room.CachedGroup
+import com.anjira.taskplanner.data.local.room.CachedMember
 import com.anjira.taskplanner.data.remote.ApiService
 import com.anjira.taskplanner.data.remote.dto.*
 import com.anjira.taskplanner.domain.model.*
@@ -29,8 +31,8 @@ class GroupRepositoryImpl(
     )
 
     override suspend fun getGroupDetail(groupId: Int): Group = apiOrCache(
-        api = { withContext(Dispatchers.IO) { apiService.getGroupDetail(groupId).execute().let { r -> if (!r.isSuccessful) throw Exception(parseError(r.errorBody()?.string())); checkBody(r).toGroup() } } },
-        cache = { throw Exception("Нет кэша") }
+        api = { withContext(Dispatchers.IO) { apiService.getGroupDetail(groupId).execute().let { r -> if (!r.isSuccessful) throw Exception(parseError(r.errorBody()?.string())); val g = checkBody(r).toGroup(); db.groupDao().insertGroups(listOf(CachedGroup(g.id, g.name, g.description, g.avatar, g.inviteCode, g.createdBy, g.createdAt, g.updatedAt))); db.memberDao().insertMembers(g.members.map { CachedMember(it.userId, groupId, it.username, it.email, it.role, it.createdAt, it.updatedAt) }); g } } },
+        cache = { withContext(Dispatchers.IO) { val g = db.groupDao().getGroupById(groupId) ?: throw Exception("Нет кэша"); val members = db.memberDao().getMembersForGroup(groupId).map { it.toGroupMember() }; g.toGroup(members) } }
     )
 
     override suspend fun updateGroup(groupId: Int, name: String?, description: String?, avatar: String?): Group =

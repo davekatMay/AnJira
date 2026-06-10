@@ -254,6 +254,9 @@ fun Route.GroupRoute() {
             val task = transaction { TaskTable.select { TaskTable.id eqId taskId }.firstOrNull() } ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Задача не найдена")); return@put }
             if (!isMember(task[TaskTable.groupId], userId)) { call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Вы не участник группы")); return@put }
             val request = call.receive<TaskUpdateRequest>()
+            if (request.status != null && task[TaskTable.assignedTo] != userId && !isAdmin(task[TaskTable.groupId], userId)) {
+                call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Только исполнитель задачи или администратор может менять статус")); return@put
+            }
             val oldStatus = task[TaskTable.status]
             val now = LocalDateTime.now().toString()
             val updated = transaction {
@@ -819,6 +822,23 @@ fun Route.GroupRoute() {
             "contacts" to updated[UserTable.contacts],
             "createdAt" to updated[UserTable.createdAt],
             "updatedAt" to updated[UserTable.updatedAt]
+        ))
+    }
+
+    // ─── OTHER USER PROFILE ──────────────────────────────────────────────
+    get("/users/{userId}") {
+        getAuthenticatedUserId(call) ?: return@get
+        val targetUserId = call.parameters["userId"]?.toIntOrNull()
+            ?: run { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Неверный ID пользователя")); return@get }
+        val user = transaction { UserTable.select { UserTable.id eqId targetUserId }.firstOrNull() }
+            ?: run { call.respond(HttpStatusCode.NotFound, mapOf("error" to "Пользователь не найден")); return@get }
+        call.respond(mapOf(
+            "id" to user[UserTable.id].value,
+            "username" to user[UserTable.username],
+            "email" to user[UserTable.email],
+            "avatar" to user[UserTable.avatar],
+            "description" to user[UserTable.description],
+            "contacts" to user[UserTable.contacts]
         ))
     }
 }

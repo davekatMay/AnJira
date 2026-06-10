@@ -167,6 +167,9 @@ interface ApiService {
     @GET("users/me")
     fun getUserProfile(): Call<UserProfileResponse>
 
+    @GET("users/{userId}")
+    fun getUserProfileById(@Path("userId") userId: Int): Call<UserProfileResponse>
+
     @PUT("users/me")
     fun updateUserProfile(@Body body: Map<String, String?>): Call<Map<String, Any?>>
 

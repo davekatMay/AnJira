@@ -30,6 +30,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
+import com.anjira.taskplanner.data.remote.RetrofitInstance
+import com.anjira.taskplanner.data.remote.dto.UserProfileResponse
 import com.anjira.taskplanner.domain.model.*
 import com.anjira.taskplanner.ui.viewmodel.GroupViewModel
 import kotlinx.coroutines.launch
@@ -171,6 +173,7 @@ fun GroupDetailScreen(
             vm = groupViewModel,
             group = group!!,
             isAdmin = group!!.members.any { it.userId == currentUserId && it.role == "admin" },
+            currentUserId = currentUserId,
             onDismiss = { showInfoDialog = false }
         )
     }
@@ -636,10 +639,11 @@ private fun CreatePlaylistDialog(vm: GroupViewModel, onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun GroupInfoDialog(vm: GroupViewModel, group: Group, isAdmin: Boolean, onDismiss: () -> Unit) {
+private fun GroupInfoDialog(vm: GroupViewModel, group: Group, isAdmin: Boolean, currentUserId: Int, onDismiss: () -> Unit) {
     var description by remember { mutableStateOf(group.description ?: "") }
     var avatar by remember { mutableStateOf(group.avatar ?: "") }
     var avatarUri by remember { mutableStateOf<Uri?>(null) }
+    var showMemberProfile by remember { mutableStateOf<GroupMember?>(null) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -651,65 +655,159 @@ private fun GroupInfoDialog(vm: GroupViewModel, group: Group, isAdmin: Boolean, 
         }
     }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(group.name) },
-        text = {
-            Column {
-                if (avatar.isNotBlank()) {
-                    AsyncImage(
-                        model = avatar,
-                        contentDescription = "Аватар",
-                        modifier = Modifier.size(80.dp).clip(CircleShape).align(Alignment.CenterHorizontally),
-                        contentScale = ContentScale.Crop
-                    )
-                    Spacer(Modifier.height(8.dp))
-                }
-                if (isAdmin) {
-                    Button(onClick = { avatarPicker.launch("image/*") }, modifier = Modifier.fillMaxWidth()) {
-                        Icon(Icons.Default.Image, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text(if (avatarUri != null) "Фото выбрано" else "Сменить аватар")
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(value = description, onValueChange = { description = it }, label = { Text("Описание") }, modifier = Modifier.fillMaxWidth())
-                    Spacer(Modifier.height(8.dp))
-                } else {
-                    group.description?.let {
-                        Text("Описание: $it", style = MaterialTheme.typography.bodyMedium)
+    Box {
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text(group.name) },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    if (avatar.isNotBlank()) {
+                        AsyncImage(
+                            model = avatar,
+                            contentDescription = "Аватар",
+                            modifier = Modifier.size(80.dp).clip(CircleShape).align(Alignment.CenterHorizontally),
+                            contentScale = ContentScale.Crop
+                        )
                         Spacer(Modifier.height(8.dp))
                     }
+                    if (isAdmin) {
+                        Button(onClick = { avatarPicker.launch("image/*") }, modifier = Modifier.fillMaxWidth()) {
+                            Icon(Icons.Default.Image, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text(if (avatarUri != null) "Фото выбрано" else "Сменить аватар")
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedTextField(value = description, onValueChange = { description = it }, label = { Text("Описание") }, modifier = Modifier.fillMaxWidth())
+                        Spacer(Modifier.height(8.dp))
+                    } else {
+                        group.description?.let {
+                            Text("Описание: $it", style = MaterialTheme.typography.bodyMedium)
+                            Spacer(Modifier.height(8.dp))
+                        }
+                    }
+                    Text("Код приглашения:", style = MaterialTheme.typography.labelLarge)
+                    Spacer(Modifier.height(4.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(group.inviteCode, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.width(8.dp))
+                        IconButton(onClick = {
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            clipboard.setPrimaryClip(ClipData.newPlainText("invite", group.inviteCode))
+                            scope.launch { snackbarHostState.showSnackbar("Код скопирован") }
+                        }) { Icon(Icons.Default.ContentCopy, "Копировать") }
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Text("Участники (${group.members.size}):", style = MaterialTheme.typography.labelLarge)
+                    Spacer(Modifier.height(4.dp))
+                    group.members.forEach { member ->
+                        Surface(
+                            onClick = { showMemberProfile = member },
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                            shape = MaterialTheme.shapes.small
+                        ) {
+                            Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                if (member.userId == currentUserId) {
+                                    Icon(Icons.Default.Person, "Вы", modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                                    Spacer(Modifier.width(4.dp))
+                                }
+                                Column(Modifier.weight(1f)) {
+                                    Text(member.username, style = MaterialTheme.typography.bodyMedium)
+                                    Text(member.role, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                Text("→", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
                 }
-                Text("Код приглашения:", style = MaterialTheme.typography.labelLarge)
-                Spacer(Modifier.height(4.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(group.inviteCode, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
-                    Spacer(Modifier.width(8.dp))
-                    IconButton(onClick = {
-                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                        clipboard.setPrimaryClip(ClipData.newPlainText("invite", group.inviteCode))
-                        scope.launch { snackbarHostState.showSnackbar("Код скопирован") }
-                    }) { Icon(Icons.Default.ContentCopy, "Копировать") }
-                }
+            },
+            confirmButton = {
                 if (isAdmin) {
-                    Spacer(Modifier.height(8.dp))
-                    Text("${group.members.size} участников", style = MaterialTheme.typography.bodySmall)
+                    TextButton(onClick = {
+                        vm.updateGroup(group.id, group.name, description.ifBlank { null }, avatar.ifBlank { null })
+                        onDismiss()
+                    }) { Text("Сохранить") }
+                } else {
+                    TextButton(onClick = onDismiss) { Text("Закрыть") }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = onDismiss) { Text("Отмена") }
+            }
+        )
+
+        if (showMemberProfile != null) {
+            UserProfileDialog(
+                userId = showMemberProfile!!.userId,
+                username = showMemberProfile!!.username,
+                onDismiss = { showMemberProfile = null }
+            )
+        }
+    }
+}
+
+@Composable
+private fun UserProfileDialog(userId: Int, username: String, onDismiss: () -> Unit) {
+    var profile by remember { mutableStateOf<UserProfileResponse?>(null) }
+    var isLoading by remember { mutableStateOf(true) }
+    var errorMsg by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(userId) {
+        try {
+            val response = RetrofitInstance.apiService.getUserProfileById(userId).execute()
+            if (response.isSuccessful) profile = response.body()
+            else errorMsg = "Не удалось загрузить профиль"
+        } catch (_: Exception) { errorMsg = "Ошибка загрузки" }
+        isLoading = false
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(username) },
+        text = {
+            when {
+                isLoading -> Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
+                errorMsg != null -> Text(errorMsg!!, color = MaterialTheme.colorScheme.error)
+                profile != null -> {
+                    val contactLines = remember(profile) {
+                        if (!profile!!.contacts.isNullOrBlank() && profile!!.contacts != "{}") {
+                            try {
+                                val c = org.json.JSONObject(profile!!.contacts)
+                                listOfNotNull(
+                                    c.optString("phone", "").ifBlank { null }?.let { "Телефон: $it" },
+                                    c.optString("email", "").ifBlank { null }?.let { "Email: $it" },
+                                    c.optString("telegram", "").ifBlank { null }?.let { "Telegram: $it" },
+                                    c.optString("vk", "").ifBlank { null }?.let { "VK: $it" }
+                                )
+                            } catch (_: Exception) { emptyList() }
+                        } else emptyList()
+                    }
+                    Column {
+                        if (!profile!!.avatar.isNullOrBlank()) {
+                            AsyncImage(
+                                model = profile!!.avatar,
+                                contentDescription = "Аватар",
+                                modifier = Modifier.size(64.dp).clip(CircleShape).align(Alignment.CenterHorizontally),
+                                contentScale = ContentScale.Crop
+                            )
+                            Spacer(Modifier.height(8.dp))
+                        }
+                        Text("Email: ${profile!!.email}", style = MaterialTheme.typography.bodyMedium)
+                        if (!profile!!.description.isNullOrBlank()) {
+                            Spacer(Modifier.height(4.dp))
+                            Text("О себе: ${profile!!.description}", style = MaterialTheme.typography.bodyMedium)
+                        }
+                        if (contactLines.isNotEmpty()) {
+                            Spacer(Modifier.height(8.dp))
+                            Text("Контакты:", style = MaterialTheme.typography.labelLarge)
+                            contactLines.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
+                        }
+                    }
                 }
             }
         },
-        confirmButton = {
-            if (isAdmin) {
-                TextButton(onClick = {
-                    vm.updateGroup(group.id, group.name, description.ifBlank { null }, avatar.ifBlank { null })
-                    onDismiss()
-                }) { Text("Сохранить") }
-            } else {
-                TextButton(onClick = onDismiss) { Text("Закрыть") }
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Отмена") }
-        }
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Закрыть") } }
     )
 }
 

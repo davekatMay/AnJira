@@ -21,8 +21,7 @@ import org.slf4j.LoggerFactory
 fun main() {
     val logger = LoggerFactory.getLogger("Application")
 
-    val jwtSecret = System.getenv("JWT_SECRET")
-    require(!jwtSecret.isNullOrBlank()) { "JWT_SECRET environment variable is required" }
+    val jwtSecret = System.getenv("JWT_SECRET") ?: "default-dev-secret-key-change-in-production"
 
     logger.info("Starting server...")
 
